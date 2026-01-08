@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Contrato de Inscripción</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            line-height: 1.6;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .contract-title {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+        .section {
+            margin-bottom: 20px;
+        }
+        .signature-section {
+            margin-top: 50px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .signature-box {
+            width: 45%;
+            text-align: center;
+            border-top: 1px solid #000;
+            padding-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="contract-title">CONTRATO DE INSCRIPCIÓN</div>
+        <p>Centro Universitario de San Cristóbal</p>
+    </div>
+    
+    <div class="section">
+        <p>En la ciudad de San Cristóbal, a los {{ date }}, se celebra el presente contrato de inscripción entre:</p>
+    </div>
+    
+    <div class="section">
+        <p><strong>EL ESTUDIANTE:</strong> {{ student.first_name }} {{ student.last_name }}, 
+        con carnet {{ student.carnet }}, identificado con CURP {{ student.curp }}, 
+        quien en lo sucesivo se denominará "EL ESTUDIANTE".</p>
+    </div>
+    
+    <div class="section">
+        <p><strong>LA INSTITUCIÓN:</strong> Centro Universitario de San Cristóbal (CUSC), 
+        quien en lo sucesivo se denominará "LA INSTITUCIÓN".</p>
+    </div>
+    
+    <div class="section">
+        <h3>CLÁUSULAS:</h3>
+        <p><strong>PRIMERA:</strong> EL ESTUDIANTE se compromete a cumplir con todas las obligaciones académicas, 
+        administrativas y de conducta establecidas por LA INSTITUCIÓN.</p>
+        
+        <p><strong>SEGUNDA:</strong> LA INSTITUCIÓN se compromete a proporcionar los servicios educativos 
+        correspondientes a la carrera de {{ student.career.name }}.</p>
+        
+        <p><strong>TERCERA:</strong> EL ESTUDIANTE se compromete a realizar los pagos correspondientes 
+        según el calendario establecido por LA INSTITUCIÓN.</p>
+    </div>
+    
+    <div class="signature-section">
+        <div class="signature-box">
+            <p>EL ESTUDIANTE</p>
+            <p>{{ student.first_name }} {{ student.last_name }}</p>
+        </div>
+        <div class="signature-box">
+            <p>LA INSTITUCIÓN</p>
+            <p>Centro Universitario de San Cristóbal</p>
+        </div>
+    </div>
+</body>
+</html>
+
