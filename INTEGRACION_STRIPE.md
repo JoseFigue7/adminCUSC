@@ -108,3 +108,4 @@ import StripePaymentForm from './StripePaymentForm';
 Ver `STRIPE_SETUP.md` para instrucciones detalladas.
 
 
+
