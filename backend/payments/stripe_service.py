@@ -19,13 +19,13 @@ class StripePaymentService:
     """Servicio para procesar pagos con Stripe"""
     
     @staticmethod
-    def create_payment_intent(amount, currency='gtq', metadata=None):
+    def create_payment_intent(amount, currency='mxn', metadata=None):
         """
         Crear un Payment Intent en Stripe
         
         Args:
-            amount: Monto en la moneda más pequeña (centavos para GTQ)
-            currency: Código de moneda (default: 'gtq' para Quetzales)
+            amount: Monto en la moneda más pequeña (centavos para MXN)
+            currency: Código de moneda (default: 'mxn' para Pesos Mexicanos)
             metadata: Diccionario con información adicional
         
         Returns:
@@ -33,7 +33,7 @@ class StripePaymentService:
         """
         try:
             # Convertir monto a centavos (Stripe usa la unidad más pequeña)
-            # Para GTQ, 1 quetzal = 100 centavos
+            # Para MXN, 1 peso = 100 centavos
             amount_in_cents = int(float(amount) * 100)
             
             intent_data = {
@@ -86,7 +86,7 @@ class StripePaymentService:
                 'success': True,
                 'status': intent.status,
                 'payment_intent': intent,
-                'amount': intent.amount / 100,  # Convertir de centavos a quetzales
+                'amount': intent.amount / 100,  # Convertir de centavos a pesos
                 'currency': intent.currency,
                 'payment_method': intent.payment_method,
             }

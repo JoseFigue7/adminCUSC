@@ -17,7 +17,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
     serializer_class = PaymentSerializer
     permission_classes = [permissions.IsAuthenticated]
     filterset_class = PaymentFilter
-    search_fields = ['student__first_name', 'student__last_name', 'student__carnet', 'payment_method', 'receipt_number', 'payment_type__name', 'payment_type__code']
+    search_fields = ['student__first_name', 'student__last_name', 'student__carnet', 'payment_method', 'receipt_number', 'payment_reference', 'transaction_id', 'payment_type__name', 'payment_type__code']
     ordering_fields = ['payment_date', 'amount', 'year', 'month', 'student__first_name', 'student__last_name']
     ordering = ['-payment_date']
     
@@ -28,6 +28,19 @@ class PaymentViewSet(viewsets.ModelViewSet):
             return [permissions.IsAuthenticated()]
         # Para crear/editar/eliminar/aprobar/rechazar requiere permiso específico
         return [permissions.IsAuthenticated(), HasPermission('manage_payments')]
+    
+    @action(detail=False, methods=['get'])
+    def pending_count(self, request):
+        """Obtener el conteo de pagos pendientes (PENDIENTE y EN_REVISION)"""
+        pending_count = Payment.objects.filter(
+            status__in=['PENDIENTE', 'EN_REVISION']
+        ).count()
+        
+        return Response({
+            'pending_count': pending_count,
+            'pending': Payment.objects.filter(status='PENDIENTE').count(),
+            'in_review': Payment.objects.filter(status='EN_REVISION').count(),
+        })
     
     @action(detail=False, methods=['get'])
     def student_status(self, request):
@@ -115,14 +128,8 @@ class PaymentViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'])
     def upload_receipt(self, request, pk=None):
-        """Subir comprobante de transferencia para un pago"""
+        """Subir comprobante de pago (imagen/PDF) para cualquier método de pago"""
         payment = self.get_object()
-        
-        if payment.payment_method != 'TRANSFERENCIA':
-            return Response(
-                {'error': 'Este pago no es de tipo transferencia'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
         
         if 'file' not in request.FILES:
             return Response(
@@ -131,8 +138,44 @@ class PaymentViewSet(viewsets.ModelViewSet):
             )
         
         file = request.FILES['file']
+        
+        # Validar tipo de archivo
+        allowed_types = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg']
+        if file.content_type not in allowed_types:
+            return Response(
+                {'error': 'Tipo de archivo no permitido. Solo se permiten PDF, JPG y PNG.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Validar tamaño (10MB máximo)
+        max_size = 10 * 1024 * 1024  # 10MB
+        if file.size > max_size:
+            return Response(
+                {'error': 'El archivo es demasiado grande. El tamaño máximo es 10MB.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
         payment.transfer_receipt = file
-        payment.status = 'EN_REVISION'
+        # Si el pago está pendiente, cambiar a en revisión
+        if payment.status == 'PENDIENTE':
+            payment.status = 'EN_REVISION'
+        payment.save()
+        
+        serializer = self.get_serializer(payment)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    @action(detail=True, methods=['patch'])
+    def update_reference(self, request, pk=None):
+        """Actualizar la referencia de pago"""
+        payment = self.get_object()
+        
+        if 'payment_reference' not in request.data:
+            return Response(
+                {'error': 'payment_reference es requerido'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        payment.payment_reference = request.data['payment_reference']
         payment.save()
         
         serializer = self.get_serializer(payment)
@@ -266,7 +309,7 @@ def create_payment_intent(request):
     
     result = StripePaymentService.create_payment_intent(
         amount=final_amount,
-        currency='gtq',  # Quetzales guatemaltecos
+        currency='mxn',  # Pesos mexicanos
         metadata=metadata
     )
     

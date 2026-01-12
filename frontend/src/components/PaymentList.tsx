@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { getPayments, approvePayment, rejectPayment, uploadPaymentReceipt, getPaymentTypes } from '../services/api';
-import { FiDollarSign, FiCheck, FiX, FiAlertCircle, FiPlus, FiDownload, FiUpload, FiArrowUp, FiArrowDown } from '../utils/icons';
+import { getPayments, approvePayment, rejectPayment, uploadPaymentReceipt, updatePaymentReference, getPaymentTypes, getPendingPaymentsCount } from '../services/api';
+import { FiDollarSign, FiCheck, FiX, FiAlertCircle, FiPlus, FiDownload, FiUpload, FiArrowUp, FiArrowDown, FiEdit2, FiSave } from '../utils/icons';
 import { useToast } from '../hooks/useToast';
 import Pagination from './Pagination';
 import AdvancedSearch, { FilterParams } from './AdvancedSearch';
@@ -23,6 +23,7 @@ interface Payment {
   status_display: string;
   payment_date: string;
   transfer_receipt?: string | null;
+  payment_reference?: string | null;
 }
 
 interface PaymentType {
@@ -41,12 +42,15 @@ const PaymentList: React.FC = () => {
   const [showRejectModal, setShowRejectModal] = useState<string | null>(null);
   const [uploadingReceipt, setUploadingReceipt] = useState<string | null>(null);
   const receiptFileInputRef = useRef<{ [key: string]: HTMLInputElement | null }>({});
+  const [editingReference, setEditingReference] = useState<string | null>(null);
+  const [referenceValue, setReferenceValue] = useState<string>('');
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
   const itemsPerPage = 20;
   const [paymentTypes, setPaymentTypes] = useState<PaymentType[]>([]);
   const [ordering, setOrdering] = useState<string>('-payment_date');
+  const [pendingCount, setPendingCount] = useState<number>(0);
 
   const loadPaymentTypes = useCallback(async () => {
     try {
@@ -58,10 +62,29 @@ const PaymentList: React.FC = () => {
     }
   }, []);
 
+  const loadPendingCount = useCallback(async () => {
+    try {
+      const response = await getPendingPaymentsCount();
+      setPendingCount(response.data.pending_count || 0);
+    } catch (error) {
+      console.error('Error loading pending count:', error);
+      setPendingCount(0);
+    }
+  }, []);
+
   const loadPayments = useCallback(async (page: number = 1, filterParams: FilterParams = {}, orderBy: string = '-payment_date') => {
     setLoading(true);
     try {
-      const paramsWithOrdering = { ...filterParams, ordering: orderBy };
+      // Limpiar filtros vacíos o undefined antes de enviar
+      const cleanFilters: FilterParams = {};
+      Object.keys(filterParams).forEach(key => {
+        const value = filterParams[key];
+        if (value !== undefined && value !== null && value !== '') {
+          cleanFilters[key] = value;
+        }
+      });
+      
+      const paramsWithOrdering = { ...cleanFilters, ordering: orderBy };
       const response = await getPayments(page, itemsPerPage, paramsWithOrdering);
       const data = response.data;
       
@@ -77,8 +100,12 @@ const PaymentList: React.FC = () => {
         setTotalPages(1);
         setTotalItems(paymentsArray.length);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading payments:', error);
+      if (error.response) {
+        console.error('Response data:', error.response.data);
+        console.error('Response status:', error.response.status);
+      }
     } finally {
       setLoading(false);
     }
@@ -86,11 +113,12 @@ const PaymentList: React.FC = () => {
 
   useEffect(() => {
     loadPaymentTypes();
-  }, [loadPaymentTypes]);
+    loadPendingCount();
+  }, []); // Solo ejecutar una vez al montar
 
   useEffect(() => {
     loadPayments(currentPage, filters, ordering);
-  }, [currentPage, filters, ordering, loadPayments]);
+  }, [currentPage, filters, ordering]);
 
   const handleFilterChange = (newFilters: FilterParams) => {
     setFilters(newFilters);
@@ -102,9 +130,25 @@ const PaymentList: React.FC = () => {
     setCurrentPage(1);
   };
 
+  const isPendingFilterActive = filters.pending === true || filters.pending === 'true';
+  
   const loadPendingStudents = () => {
-    // Aplicar filtro de estado pendiente
-    setFilters({ status: 'PENDIENTE' });
+    // Aplicar filtro de estado pendiente (PENDIENTE y EN_REVISION)
+    // Si ya está filtrado por pendientes, resetear filtros; si no, aplicar filtro
+    if (isPendingFilterActive) {
+      // Si ya está activo, resetear
+      const newFilters = { ...filters };
+      delete newFilters.pending;
+      delete newFilters.status;
+      setFilters(newFilters);
+    } else {
+      // Aplicar filtro de pendientes, limpiando otros filtros de estado
+      const newFilters = { ...filters };
+      delete newFilters.status; // Eliminar filtro de estado único si existe
+      delete newFilters.status__in; // Limpiar el antiguo filtro si existe
+      newFilters.pending = true;
+      setFilters(newFilters);
+    }
     setCurrentPage(1);
   };
 
@@ -148,6 +192,10 @@ const PaymentList: React.FC = () => {
     try {
       await approvePayment(id);
       await loadPayments(currentPage, filters, ordering);
+      // Actualizar conteo solo si estamos viendo pagos pendientes o no hay filtro de estado
+      if (!filters.status || filters.pending) {
+        await loadPendingCount();
+      }
       success('Pago aprobado exitosamente');
     } catch (err: any) {
       console.error('Error approving payment:', err);
@@ -168,6 +216,10 @@ const PaymentList: React.FC = () => {
     try {
       await rejectPayment(id, rejectNotes);
       await loadPayments(currentPage, filters, ordering);
+      // Actualizar conteo solo si estamos viendo pagos pendientes o no hay filtro de estado
+      if (!filters.status || filters.pending) {
+        await loadPendingCount();
+      }
       setShowRejectModal(null);
       setRejectNotes('');
       success('Pago rechazado exitosamente');
@@ -248,7 +300,32 @@ const PaymentList: React.FC = () => {
     }
   };
 
-  const pendingCount = payments.filter(p => p.status === 'PENDIENTE' || p.status === 'EN_REVISION').length;
+  const handleStartEditReference = (payment: Payment) => {
+    setEditingReference(payment.id);
+    setReferenceValue(payment.payment_reference || '');
+  };
+
+  const handleCancelEditReference = () => {
+    setEditingReference(null);
+    setReferenceValue('');
+  };
+
+  const handleSaveReference = async (paymentId: string) => {
+    setProcessingId(paymentId);
+    try {
+      await updatePaymentReference(paymentId, referenceValue);
+      await loadPayments(currentPage, filters, ordering);
+      setEditingReference(null);
+      setReferenceValue('');
+      success('Referencia actualizada exitosamente');
+    } catch (err: any) {
+      console.error('Error updating reference:', err);
+      const errorMessage = err.response?.data?.detail || err.response?.data?.error || 'Error al actualizar la referencia';
+      error(errorMessage);
+    } finally {
+      setProcessingId(null);
+    }
+  };
 
   if (loading) {
     return (
@@ -277,7 +354,11 @@ const PaymentList: React.FC = () => {
               <FiPlus /> Nuevo Pago
             </Link>
             {pendingCount > 0 && (
-              <button className="btn btn-warning btn-large" onClick={loadPendingStudents}>
+              <button 
+                className={`btn btn-large ${isPendingFilterActive ? 'btn-primary' : 'btn-warning'}`}
+                onClick={loadPendingStudents}
+                title={isPendingFilterActive ? "Quitar filtro de pendientes" : "Ver pagos pendientes y en revisión"}
+              >
                 <FiAlertCircle /> {pendingCount} Pendientes
               </button>
             )}
@@ -352,6 +433,7 @@ const PaymentList: React.FC = () => {
                   >
                     Fecha {getSortIcon('payment_date')}
                   </th>
+                  <th>Referencia</th>
                   <th>Comprobante</th>
                   <th>Estado</th>
                   <th className="actions-column">Acciones</th>
@@ -394,46 +476,104 @@ const PaymentList: React.FC = () => {
                     <td className="date-cell">
                       {formatDate(payment.payment_date)}
                     </td>
-                    <td className="receipt-cell">
-                      {payment.payment_method === 'TRANSFERENCIA' ? (
-                        payment.transfer_receipt ? (
+                    <td className="reference-cell">
+                      {editingReference === payment.id ? (
+                        <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                          <input
+                            type="text"
+                            value={referenceValue}
+                            onChange={(e) => setReferenceValue(e.target.value)}
+                            placeholder="Referencia..."
+                            style={{
+                              padding: '4px 8px',
+                              borderRadius: '4px',
+                              border: '1px solid var(--border-color)',
+                              fontSize: '0.85rem',
+                              width: '150px'
+                            }}
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                handleSaveReference(payment.id);
+                              } else if (e.key === 'Escape') {
+                                handleCancelEditReference();
+                              }
+                            }}
+                          />
                           <button
-                            className="btn-icon-small btn-icon-info"
-                            onClick={() => handleDownloadReceipt(payment.transfer_receipt!, payment.id)}
-                            title="Ver comprobante"
+                            className="btn-icon-small btn-icon-success"
+                            onClick={() => handleSaveReference(payment.id)}
+                            disabled={processingId === payment.id}
+                            title="Guardar"
                           >
-                            <FiDownload />
+                            {processingId === payment.id ? (
+                              <div className="mini-spinner"></div>
+                            ) : (
+                              <FiSave />
+                            )}
                           </button>
-                        ) : (
-                          <div className="receipt-upload-container">
-                            <input
-                              type="file"
-                              id={`receipt-${payment.id}`}
-                              accept=".pdf,.jpg,.jpeg,.png"
-                              onChange={(e) => handleReceiptFileChange(payment.id, e)}
-                              style={{ display: 'none' }}
-                              ref={(el) => {
-                                if (el) {
-                                  receiptFileInputRef.current[payment.id] = el;
-                                }
-                              }}
-                            />
-                            <button
-                              className="btn-icon-small btn-icon-warning"
-                              onClick={() => document.getElementById(`receipt-${payment.id}`)?.click()}
-                              disabled={uploadingReceipt === payment.id}
-                              title="Subir comprobante"
-                            >
-                              {uploadingReceipt === payment.id ? (
-                                <div className="mini-spinner"></div>
-                              ) : (
-                                <FiUpload />
-                              )}
-                            </button>
-                          </div>
-                        )
+                          <button
+                            className="btn-icon-small btn-icon-danger"
+                            onClick={handleCancelEditReference}
+                            disabled={processingId === payment.id}
+                            title="Cancelar"
+                          >
+                            <FiX />
+                          </button>
+                        </div>
                       ) : (
-                        <span className="no-receipt">-</span>
+                        <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                          <span style={{ fontSize: '0.85rem', color: payment.payment_reference ? 'var(--text-color)' : 'var(--text-secondary)' }}>
+                            {payment.payment_reference || '-'}
+                          </span>
+                          {(payment.status === 'PENDIENTE' || payment.status === 'EN_REVISION') && (
+                            <button
+                              className="btn-icon-small btn-icon-info"
+                              onClick={() => handleStartEditReference(payment)}
+                              title="Editar referencia"
+                            >
+                              <FiEdit2 />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                    <td className="receipt-cell">
+                      {payment.transfer_receipt ? (
+                        <button
+                          className="btn-icon-small btn-icon-info"
+                          onClick={() => handleDownloadReceipt(payment.transfer_receipt!, payment.id)}
+                          title="Ver comprobante"
+                        >
+                          <FiDownload />
+                        </button>
+                      ) : (
+                        <div className="receipt-upload-container">
+                          <input
+                            type="file"
+                            id={`receipt-${payment.id}`}
+                            accept=".pdf,.jpg,.jpeg,.png"
+                            onChange={(e) => handleReceiptFileChange(payment.id, e)}
+                            style={{ display: 'none' }}
+                            ref={(el) => {
+                              if (el) {
+                                receiptFileInputRef.current[payment.id] = el;
+                              }
+                            }}
+                          />
+                          <button
+                            className="btn-icon-small btn-icon-warning"
+                            onClick={() => document.getElementById(`receipt-${payment.id}`)?.click()}
+                            disabled={uploadingReceipt === payment.id}
+                            title="Subir comprobante"
+                          >
+                            {uploadingReceipt === payment.id ? (
+                              <div className="mini-spinner"></div>
+                            ) : (
+                              <FiUpload />
+                            )}
+                          </button>
+                        </div>
                       )}
                     </td>
                     <td>

@@ -5,13 +5,15 @@ import {
   getCareerPensum, 
   getCourseEnrollments, 
   createCourseEnrollment,
-  getCourses 
+  getCourses,
+  academicsApi
 } from '../services/api';
 import { 
   FiBook, FiCheckCircle, FiXCircle, FiPlus, FiArrowLeft, 
-  FiSearch, FiFilter 
+  FiSearch, FiFilter, FiClock, FiAlertTriangle
 } from '../utils/icons';
 import { useToast } from '../hooks/useToast';
+import { getAcademicPeriod, getCuatrimestresByPeriod, getPeriodName } from '../utils/academicPeriod';
 import './shared.css';
 import './CourseEnrollment.css';
 
@@ -24,6 +26,13 @@ interface Student {
   career_name: string;
 }
 
+interface CourseSchedule {
+  id: string;
+  day: string;
+  start_time: string;
+  end_time: string;
+}
+
 interface Course {
   id: string;
   code: string;
@@ -31,7 +40,9 @@ interface Course {
   credits: number;
   is_required: boolean;
   cuatrimestre_name: string;
+  cuatrimestre_number?: number;
   prerequisite: string | null;
+  schedules?: CourseSchedule[];
 }
 
 interface Enrollment {
@@ -47,9 +58,11 @@ const CourseEnrollment: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const studentId = searchParams.get('studentId');
+  const cuatrimestreEnrollmentId = searchParams.get('cuatrimestreEnrollmentId');
   const { success, error } = useToast();
 
   const [student, setStudent] = useState<Student | null>(null);
+  const [cuatrimestreEnrollment, setCuatrimestreEnrollment] = useState<any>(null);
   const [courses, setCourses] = useState<Course[]>([]);
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,32 +72,85 @@ const CourseEnrollment: React.FC = () => {
   const [enrolling, setEnrolling] = useState(false);
 
   useEffect(() => {
-    if (studentId) {
+    if (studentId || cuatrimestreEnrollmentId) {
       loadData();
     }
-  }, [studentId]);
+  }, [studentId, cuatrimestreEnrollmentId]);
 
   const loadData = async () => {
-    if (!studentId) return;
+    if (!studentId && !cuatrimestreEnrollmentId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const [studentRes, enrollmentsRes] = await Promise.all([
-        getStudent(studentId),
-        getCourseEnrollments(studentId)
-      ]);
+      let studentData;
+      let enrollmentData;
 
-      setStudent(studentRes.data);
-      const enrollments = enrollmentsRes.data.results || enrollmentsRes.data;
-      setEnrollments(enrollments);
+      if (cuatrimestreEnrollmentId) {
+        // Cargar datos desde cuatrimestre enrollment
+        const [cuatEnrollmentRes, coursesRes] = await Promise.all([
+          academicsApi.getCuatrimestreEnrollment(cuatrimestreEnrollmentId),
+          academicsApi.getCoursesInCuatrimestre(cuatrimestreEnrollmentId)
+        ]);
 
-      // Cargar cursos de la carrera
-      if (studentRes.data.career) {
-        const coursesRes = await getCourses(studentRes.data.career);
-        const allCourses = coursesRes.data.results || coursesRes.data;
-        setCourses(allCourses);
+        enrollmentData = cuatEnrollmentRes.data;
+        setCuatrimestreEnrollment(enrollmentData);
+        studentData = { data: await getStudent(enrollmentData.student).then(r => r.data) };
+        
+        const courseEnrollments = coursesRes.data.results || coursesRes.data;
+        setEnrollments(courseEnrollments);
+        
+        // Cargar cursos disponibles del mismo período académico (no solo del mismo cuatrimestre)
+        const cuatrimestreRes = await academicsApi.getCuatrimestres({ id: enrollmentData.cuatrimestre });
+        const cuatrimestre = (cuatrimestreRes.data.results || cuatrimestreRes.data)[0];
+        
+        if (cuatrimestre && enrollmentData.cuatrimestre_number) {
+          // Obtener el período académico
+          const period = getAcademicPeriod(enrollmentData.cuatrimestre_number);
+          if (period && cuatrimestre.career) {
+            // Obtener números de cuatrimestres del mismo período
+            const periodCuatrimestres = getCuatrimestresByPeriod(period);
+            
+            // Cargar todos los cursos de la carrera con page_size grande para evitar paginación
+            const allCoursesRes = await getCourses({ career: cuatrimestre.career, page_size: 1000 });
+            const allCourses = allCoursesRes.data.results || allCoursesRes.data;
+            
+            // Filtrar cursos que pertenezcan al mismo período académico
+            const periodCourses = allCourses.filter((course: Course) => 
+              course.cuatrimestre_number && periodCuatrimestres.includes(course.cuatrimestre_number)
+            );
+            setCourses(periodCourses);
+          }
+        }
+      } else if (studentId) {
+        // Modo normal sin cuatrimestre enrollment
+        const [studentRes, enrollmentsRes] = await Promise.all([
+          getStudent(studentId),
+          getCourseEnrollments(studentId)
+        ]);
+
+        studentData = studentRes;
+        const enrollments = enrollmentsRes.data.results || enrollmentsRes.data;
+        setEnrollments(enrollments);
+
+        // Cargar cursos de la carrera
+        if (studentRes.data.career) {
+          const coursesRes = await getCourses({ career: studentRes.data.career });
+          const allCourses = coursesRes.data.results || coursesRes.data;
+          setCourses(allCourses);
+        }
       }
-    } catch (error) {
-      console.error('Error loading data:', error);
+
+      if (studentData) {
+        setStudent(studentData.data);
+      }
+    } catch (err: any) {
+      console.error('Error loading data:', err);
+      console.error('Error response:', err.response);
+      const errorMessage = err.response?.data?.detail || err.response?.data?.error || 'Error al cargar los datos';
+      error(errorMessage);
+      setStudent(null);
     } finally {
       setLoading(false);
     }
@@ -92,12 +158,25 @@ const CourseEnrollment: React.FC = () => {
 
   const enrolledCourseIds = new Set(enrollments.map(e => e.course_id || (e as any).course || ''));
 
+  // Filtrar cursos aprobados (no se pueden volver a inscribir)
+  const approvedCourseIds = new Set(
+    enrollments
+      .filter(e => e.status === 'APROBADO')
+      .map(e => e.course_id || (e as any).course || '')
+  );
+
   const availableCourses = courses.filter(course => {
-    // Filtrar cursos ya matriculados
+    // Filtrar cursos ya matriculados en este cuatrimestre
     if (enrolledCourseIds.has(course.id)) return false;
     
-    // Filtrar por cuatrimestre
-    if (filterCuatrimestre !== 'ALL' && course.cuatrimestre_name !== filterCuatrimestre) {
+    // Filtrar cursos ya aprobados (no se pueden volver a inscribir)
+    if (approvedCourseIds.has(course.id)) return false;
+    
+    // Si hay cuatrimestreEnrollment, los cursos ya están filtrados por período en loadData
+    // Solo aplicar filtro de búsqueda si existe
+    
+    // Filtrar por cuatrimestre (si no hay cuatrimestreEnrollment)
+    if (!cuatrimestreEnrollment && filterCuatrimestre !== 'ALL' && course.cuatrimestre_name !== filterCuatrimestre) {
       return false;
     }
     
@@ -115,37 +194,111 @@ const CourseEnrollment: React.FC = () => {
 
   const cuatrimestres = Array.from(new Set(courses.map(c => c.cuatrimestre_name))).sort();
 
+  // Función para verificar si dos horarios se traslapan
+  const schedulesOverlap = (schedule1: CourseSchedule, schedule2: CourseSchedule): boolean => {
+    if (schedule1.day !== schedule2.day) return false;
+    
+    const start1 = new Date(`2000-01-01T${schedule1.start_time}`);
+    const end1 = new Date(`2000-01-01T${schedule1.end_time}`);
+    const start2 = new Date(`2000-01-01T${schedule2.start_time}`);
+    const end2 = new Date(`2000-01-01T${schedule2.end_time}`);
+    
+    return start1 < end2 && start2 < end1;
+  };
+
+  // Función para verificar traslapes entre cursos seleccionados
+  const checkScheduleOverlaps = (selectedCourseIds: Set<string>): { hasOverlap: boolean; overlapDetails: string[] } => {
+    const overlaps: string[] = [];
+    const selectedCoursesList = courses.filter(c => selectedCourseIds.has(c.id));
+    
+    for (let i = 0; i < selectedCoursesList.length; i++) {
+      const course1 = selectedCoursesList[i];
+      const schedules1 = course1.schedules || [];
+      
+      if (schedules1.length === 0) continue;
+      
+      for (let j = i + 1; j < selectedCoursesList.length; j++) {
+        const course2 = selectedCoursesList[j];
+        const schedules2 = course2.schedules || [];
+        
+        if (schedules2.length === 0) continue;
+        
+        // Verificar traslapes entre todos los horarios de course1 y course2
+        for (const s1 of schedules1) {
+          for (const s2 of schedules2) {
+            if (schedulesOverlap(s1, s2)) {
+              const time1 = `${s1.start_time.substring(0, 5)}-${s1.end_time.substring(0, 5)}`;
+              const time2 = `${s2.start_time.substring(0, 5)}-${s2.end_time.substring(0, 5)}`;
+              overlaps.push(`${course1.code} (${s1.day} ${time1}) y ${course2.code} (${s2.day} ${time2})`);
+            }
+          }
+        }
+      }
+    }
+    
+    return {
+      hasOverlap: overlaps.length > 0,
+      overlapDetails: overlaps
+    };
+  };
+
   const toggleCourseSelection = (courseId: string) => {
     const newSelected = new Set(selectedCourses);
+    
     if (newSelected.has(courseId)) {
       newSelected.delete(courseId);
     } else {
+      // Validar máximo 7 cursos
+      if (cuatrimestreEnrollmentId && newSelected.size >= 7) {
+        error('No se pueden seleccionar más de 7 cursos por cuatrimestre');
+        return;
+      }
+      
+      // Validar traslapes antes de agregar
       newSelected.add(courseId);
+      const overlapCheck = checkScheduleOverlaps(newSelected);
+      
+      if (overlapCheck.hasOverlap) {
+        newSelected.delete(courseId);
+        error(`Los horarios se traslapan: ${overlapCheck.overlapDetails[0]}`);
+        return;
+      }
     }
+    
     setSelectedCourses(newSelected);
   };
 
   const handleEnroll = async () => {
-    if (!studentId || selectedCourses.size === 0) return;
+    if ((!studentId && !cuatrimestreEnrollmentId) || selectedCourses.size === 0) return;
     
     setEnrolling(true);
     try {
-      await Promise.all(
-        Array.from(selectedCourses).map(courseId => 
-          createCourseEnrollment({
-            student: studentId,
-            course: courseId,
-            status: 'MATRICULADO'
-          })
-        )
-      );
+      if (cuatrimestreEnrollmentId) {
+        // Inscribir cursos en el cuatrimestre específico
+        await academicsApi.enrollCoursesInCuatrimestre(
+          cuatrimestreEnrollmentId,
+          Array.from(selectedCourses)
+        );
+        success(`Se matricularon ${selectedCourses.size} curso(s) exitosamente`);
+      } else if (studentId) {
+        // Modo normal: matricular sin cuatrimestre enrollment
+        await Promise.all(
+          Array.from(selectedCourses).map(courseId => 
+            createCourseEnrollment({
+              student: studentId,
+              course: courseId,
+              status: 'MATRICULADO'
+            })
+          )
+        );
+        success(`Se matricularon ${selectedCourses.size} curso(s) exitosamente`);
+      }
       
-      success(`Se matricularon ${selectedCourses.size} curso(s) exitosamente`);
       setSelectedCourses(new Set());
       await loadData();
     } catch (err: any) {
       console.error('Error enrolling courses:', err);
-      const errorMessage = err.response?.data?.detail || 'Error al matricular cursos';
+      const errorMessage = err.response?.data?.detail || err.response?.data?.error || 'Error al matricular cursos';
       error(errorMessage);
     } finally {
       setEnrolling(false);
@@ -174,12 +327,12 @@ const CourseEnrollment: React.FC = () => {
     );
   }
 
-  if (!student) {
+  if (!student && !cuatrimestreEnrollment) {
     return (
       <div className="page-container">
         <div className="empty-state">
           <FiBook className="empty-icon" />
-          <h3>No se especificó un estudiante</h3>
+          <h3>{studentId || cuatrimestreEnrollmentId ? 'Estudiante no encontrado' : 'No se especificó un estudiante'}</h3>
           <button onClick={() => navigate('/students')} className="btn btn-primary">
             <FiArrowLeft /> Volver a estudiantes
           </button>
@@ -198,30 +351,60 @@ const CourseEnrollment: React.FC = () => {
               <h1>Matrícula de Cursos</h1>
               <p className="header-subtitle">
                 {student.first_name} {student.last_name} - {student.carnet} | {student.career_name}
+                {cuatrimestreEnrollment && (
+                  <>
+                    {' | '}{cuatrimestreEnrollment.cuatrimestre_name} {cuatrimestreEnrollment.academic_year}
+                    {cuatrimestreEnrollment.cuatrimestre_number && (
+                      <> ({getPeriodName(getAcademicPeriod(cuatrimestreEnrollment.cuatrimestre_number) || 0)})</>
+                    )}
+                  </>
+                )}
               </p>
             </div>
           </div>
           <div className="header-actions">
             <button 
-              onClick={() => navigate(`/students/${studentId}`)} 
+              onClick={() => {
+                if (cuatrimestreEnrollmentId && cuatrimestreEnrollment) {
+                  navigate(`/cuatrimestre-enrollments?studentId=${cuatrimestreEnrollment.student}`);
+                } else if (studentId) {
+                  navigate(`/students/${studentId}`);
+                } else {
+                  navigate('/students');
+                }
+              }} 
               className="btn btn-secondary btn-large"
             >
               <FiArrowLeft /> Volver
             </button>
             {selectedCourses.size > 0 && (
-              <button 
-                onClick={handleEnroll} 
-                className="btn btn-primary btn-large"
-                disabled={enrolling}
-              >
-                {enrolling ? (
-                  <>Cargando...</>
-                ) : (
-                  <>
-                    <FiPlus /> Matricular {selectedCourses.size} curso(s)
-                  </>
+              <>
+                {cuatrimestreEnrollmentId && selectedCourses.size > 7 && (
+                  <div className="warning-message" style={{ 
+                    background: '#fed7d7', 
+                    color: '#742a2a', 
+                    padding: '0.5rem 1rem', 
+                    borderRadius: '4px',
+                    marginRight: '1rem'
+                  }}>
+                    <FiAlertTriangle style={{ marginRight: '0.5rem' }} />
+                    Máximo 7 cursos permitidos
+                  </div>
                 )}
-              </button>
+                <button 
+                  onClick={handleEnroll} 
+                  className="btn btn-primary btn-large"
+                  disabled={enrolling || (cuatrimestreEnrollmentId && selectedCourses.size > 7)}
+                >
+                  {enrolling ? (
+                    <>Cargando...</>
+                  ) : (
+                    <>
+                      <FiPlus /> Matricular {selectedCourses.size} curso(s)
+                    </>
+                  )}
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -239,21 +422,28 @@ const CourseEnrollment: React.FC = () => {
               className="search-input"
             />
           </div>
-          <div className="filter-group">
-            <FiFilter className="filter-icon" />
-            <select
-              value={filterCuatrimestre}
-              onChange={(e) => setFilterCuatrimestre(e.target.value)}
-              className="filter-select"
-            >
-              <option value="ALL">Todos los cuatrimestres</option>
-              {cuatrimestres.map(cuat => (
-                <option key={cuat} value={cuat}>{cuat}</option>
-              ))}
-            </select>
-          </div>
+          {!cuatrimestreEnrollment && (
+            <div className="filter-group">
+              <FiFilter className="filter-icon" />
+              <select
+                value={filterCuatrimestre}
+                onChange={(e) => setFilterCuatrimestre(e.target.value)}
+                className="filter-select"
+              >
+                <option value="ALL">Todos los cuatrimestres</option>
+                {cuatrimestres.map(cuat => (
+                  <option key={cuat} value={cuat}>{cuat}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="stats-badge">
             {availableCourses.length} curso(s) disponible(s)
+            {cuatrimestreEnrollmentId && (
+              <span style={{ marginLeft: '1rem', fontSize: '0.875rem', color: '#6b7280' }}>
+                | Máximo 7 cursos | {selectedCourses.size} seleccionado(s)
+              </span>
+            )}
           </div>
         </div>
 
@@ -284,6 +474,26 @@ const CourseEnrollment: React.FC = () => {
                     <span className="course-cuatrimestre">{course.cuatrimestre_name}</span>
                     <span className="course-credits">{course.credits} créditos</span>
                   </div>
+                  
+                  {/* Mostrar horarios */}
+                  {course.schedules && course.schedules.length > 0 && (
+                    <div className="course-schedules" style={{ marginTop: '0.75rem', fontSize: '0.875rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '0.5rem', color: '#6b7280' }}>
+                        <FiClock style={{ marginRight: '0.5rem' }} />
+                        <strong>Horarios:</strong>
+                      </div>
+                      {course.schedules.map((schedule) => (
+                        <div key={schedule.id} style={{ 
+                          marginLeft: '1.5rem', 
+                          marginBottom: '0.25rem',
+                          color: '#4b5563'
+                        }}>
+                          {schedule.day}: {schedule.start_time.substring(0, 5)} - {schedule.end_time.substring(0, 5)}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
                   {course.prerequisite && !canEnroll && (
                     <div className="prerequisite-warning">
                       Requiere aprobar el prerequisito

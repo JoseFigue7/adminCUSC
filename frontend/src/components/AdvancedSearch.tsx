@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FiSearch, FiFilter, FiX } from '../utils/icons';
 import './AdvancedSearch.css';
 
@@ -24,6 +24,11 @@ interface AdvancedSearchProps {
 const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ onFilterChange, filters, type, onReset, paymentTypes = [] }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [localFilters, setLocalFilters] = useState<FilterParams>(filters);
+  
+  // Sincronizar filtros locales cuando cambien los filtros externos
+  useEffect(() => {
+    setLocalFilters(filters);
+  }, [filters]);
 
   const handleFilterChange = (key: string, value: any) => {
     const newFilters = { ...localFilters, [key]: value || undefined };
@@ -216,7 +221,19 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ onFilterChange, filters
               <label>Estado</label>
               <select
                 value={localFilters.status || ''}
-                onChange={(e) => handleFilterChange('status', e.target.value || undefined)}
+                onChange={(e) => {
+                  const newFilters = { ...localFilters };
+                  // Limpiar pending si se selecciona un estado único
+                  delete newFilters.pending;
+                  delete newFilters.status__in; // Limpiar el antiguo filtro si existe
+                  if (e.target.value) {
+                    newFilters.status = e.target.value;
+                  } else {
+                    delete newFilters.status;
+                  }
+                  setLocalFilters(newFilters);
+                  onFilterChange(newFilters);
+                }}
               >
                 <option value="">Todos</option>
                 <option value="PENDIENTE">Pendiente</option>

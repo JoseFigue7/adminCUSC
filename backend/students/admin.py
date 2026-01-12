@@ -2,7 +2,11 @@ from django.contrib import admin
 from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
-from .models import Student, Enrollment, StudentDocument
+from .models import (
+    Student, Enrollment, StudentDocument,
+    Pais, EntidadFederativa, Idioma, NecesidadEducativaEspecial,
+    AntecedenteAcademico, NivelEducativo, ModalidadEducativa, Turno
+)
 
 
 class StudentDocumentInline(admin.TabularInline):
@@ -15,14 +19,15 @@ class StudentDocumentInline(admin.TabularInline):
     show_change_link = True
 
 
-class EnrollmentInline(admin.StackedInline):
-    """Inline para inscripción de estudiantes"""
+class EnrollmentInline(admin.TabularInline):
+    """Inline para inscripciones de estudiantes (múltiples inscripciones por ciclo)"""
     model = Enrollment
-    can_delete = False
+    extra = 0
     verbose_name = "Inscripción"
-    verbose_name_plural = "Inscripción"
-    fields = ('enrollment_date', 'status', 'contract_generated', 'contract_file')
+    verbose_name_plural = "Inscripciones"
+    fields = ('enrollment_status', 'school_year', 'institutional_id', 'status', 'contract_generated')
     readonly_fields = ('enrollment_date',)
+    fk_name = 'student'
 
 
 @admin.register(Student)
@@ -31,8 +36,8 @@ class StudentAdmin(admin.ModelAdmin):
         'carnet_display', 'full_name_display', 'email', 'career_link', 
         'status_badge', 'scholarship_badge', 'enrollment_date'
     ]
-    list_filter = ['is_active', 'career', 'scholarship_type', 'pensum_closed', 'thesis_started', 'enrollment_date']
-    search_fields = ['carnet', 'first_name', 'last_name', 'email', 'curp']
+    list_filter = ['is_active', 'career', 'scholarship_type', 'pensum_closed', 'thesis_started', 'enrollment_date', 'gender', 'birth_country']
+    search_fields = ['carnet', 'first_name', 'first_last_name', 'second_last_name', 'email', 'curp']
     readonly_fields = [
         'id', 'carnet', 'created_at', 'updated_at', 
         'student_documents_link', 'student_payments_link'
@@ -40,14 +45,31 @@ class StudentAdmin(admin.ModelAdmin):
     inlines = [EnrollmentInline, StudentDocumentInline]
     
     fieldsets = (
-        ('Información Personal', {
+        ('Información Personal - SEP', {
             'fields': (
-                ('first_name', 'last_name'),
-                ('email', 'phone'),
+                ('first_name',),
+                ('first_last_name', 'second_last_name'),
                 ('date_of_birth', 'gender'),
-                ('curp', 'address'),
+                'curp',
             ),
             'classes': ('wide',),
+        }),
+        ('Lugar de Nacimiento - SEP', {
+            'fields': (
+                ('birth_country', 'birth_state'),
+                ('origin_country', 'native_language'),
+            ),
+        }),
+        ('Información Académica - SEP', {
+            'fields': (
+                ('academic_background', 'special_educational_need'),
+            ),
+        }),
+        ('Información de Contacto', {
+            'fields': (
+                ('email', 'phone'),
+                'address',
+            ),
         }),
         ('Información Académica', {
             'fields': (
@@ -181,28 +203,47 @@ class StudentAdmin(admin.ModelAdmin):
     mark_inactive.short_description = "Marcar como inactivos"
     
     def approve_enrollment(self, request, queryset):
-        """Aprobar inscripciones"""
+        """Aprobar inscripciones pendientes"""
         count = 0
         for student in queryset:
-            if hasattr(student, 'enrollment'):
-                student.enrollment.status = 'APROBADA'
-                student.enrollment.save()
+            enrollments = student.enrollments.filter(status='PENDIENTE')
+            for enrollment in enrollments:
+                enrollment.status = 'APROBADA'
+                enrollment.save()
                 count += 1
         self.message_user(request, f'{count} inscripción(es) aprobada(s).')
-    approve_enrollment.short_description = "Aprobar inscripciones"
+    approve_enrollment.short_description = "Aprobar inscripciones pendientes"
 
 
 @admin.register(Enrollment)
 class EnrollmentAdmin(admin.ModelAdmin):
     list_display = [
-        'student_link', 'enrollment_date', 'status_badge', 
-        'contract_status', 'contract_file_link'
+        'student_link', 'enrollment_status_display', 'school_year', 'institutional_id',
+        'status_badge', 'contract_status', 'contract_file_link'
     ]
-    list_filter = ['status', 'contract_generated', 'enrollment_date']
-    search_fields = ['student__first_name', 'student__last_name', 'student__carnet']
+    list_filter = ['status', 'enrollment_status', 'school_year', 'contract_generated', 'enrollment_date', 'career']
+    search_fields = ['student__first_name', 'student__first_last_name', 'student__carnet', 'institutional_id']
     readonly_fields = ['id', 'enrollment_date', 'created_at', 'updated_at']
     
     fieldsets = (
+        ('Información SEP - Estatus y Ciclo', {
+            'fields': (
+                ('enrollment_status', 'school_year'),
+                'institutional_id',
+            ),
+        }),
+        ('Información SEP - Institución', {
+            'fields': (
+                ('cct', 'career'),
+                ('educational_level', 'shift'),
+                'educational_modality',
+            ),
+        }),
+        ('Información SEP - RVOE', {
+            'fields': (
+                ('rvoe_agreement_number', 'rvoe_agreement_date'),
+            ),
+        }),
         ('Información de Inscripción', {
             'fields': (
                 'student',
@@ -224,6 +265,21 @@ class EnrollmentAdmin(admin.ModelAdmin):
             'classes': ('collapse',),
         }),
     )
+    
+    def enrollment_status_display(self, obj):
+        """Display del estatus de inscripción/reinscripción"""
+        colors = {
+            'INSCRIPCION': '#007bff',
+            'REINSCRIPCION': '#28a745'
+        }
+        color = colors.get(obj.enrollment_status, '#6c757d')
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 8px; border-radius: 3px; font-size: 11px;">{}</span>',
+            color,
+            obj.get_enrollment_status_display()
+        )
+    enrollment_status_display.short_description = 'Estatus SEP'
+    enrollment_status_display.admin_order_field = 'enrollment_status'
     
     def student_link(self, obj):
         """Link al estudiante"""
@@ -352,3 +408,81 @@ class StudentDocumentAdmin(admin.ModelAdmin):
             )
         return format_html('<span style="color: #999;">Sin archivo</span>')
     file_link.short_description = 'Archivo'
+
+
+# ==================== ADMIN DE CATÁLOGOS SEP ====================
+
+@admin.register(Pais)
+class PaisAdmin(admin.ModelAdmin):
+    list_display = ['codigo', 'nombre', 'is_active']
+    list_filter = ['is_active']
+    search_fields = ['codigo', 'nombre']
+    ordering = ['nombre']
+
+
+@admin.register(EntidadFederativa)
+class EntidadFederativaAdmin(admin.ModelAdmin):
+    list_display = ['pais', 'codigo', 'nombre', 'is_active']
+    list_filter = ['pais', 'is_active']
+    search_fields = ['codigo', 'nombre', 'pais__nombre']
+    ordering = ['pais', 'nombre']
+    raw_id_fields = ['pais']
+    
+    fieldsets = (
+        ('Información de la Entidad', {
+            'fields': (
+                'pais',
+                'codigo',
+                'nombre',
+                'is_active',
+            ),
+        }),
+    )
+
+
+@admin.register(Idioma)
+class IdiomaAdmin(admin.ModelAdmin):
+    list_display = ['codigo', 'nombre', 'is_active']
+    list_filter = ['is_active']
+    search_fields = ['codigo', 'nombre']
+    ordering = ['nombre']
+
+
+@admin.register(NecesidadEducativaEspecial)
+class NecesidadEducativaEspecialAdmin(admin.ModelAdmin):
+    list_display = ['codigo', 'nombre', 'tipo', 'is_active']
+    list_filter = ['tipo', 'is_active']
+    search_fields = ['codigo', 'nombre']
+    ordering = ['nombre']
+
+
+@admin.register(AntecedenteAcademico)
+class AntecedenteAcademicoAdmin(admin.ModelAdmin):
+    list_display = ['codigo', 'nombre', 'is_active']
+    list_filter = ['is_active']
+    search_fields = ['codigo', 'nombre']
+    ordering = ['nombre']
+
+
+@admin.register(NivelEducativo)
+class NivelEducativoAdmin(admin.ModelAdmin):
+    list_display = ['codigo', 'nombre', 'is_active']
+    list_filter = ['is_active']
+    search_fields = ['codigo', 'nombre']
+    ordering = ['nombre']
+
+
+@admin.register(ModalidadEducativa)
+class ModalidadEducativaAdmin(admin.ModelAdmin):
+    list_display = ['codigo', 'nombre', 'is_active']
+    list_filter = ['is_active']
+    search_fields = ['codigo', 'nombre']
+    ordering = ['nombre']
+
+
+@admin.register(Turno)
+class TurnoAdmin(admin.ModelAdmin):
+    list_display = ['codigo', 'nombre', 'is_active']
+    list_filter = ['is_active']
+    search_fields = ['codigo', 'nombre']
+    ordering = ['nombre']

@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Certificado de Cursos</title>
+    <style>
+        body {
+            font-family: "Times New Roman", serif;
+            margin: 60px;
+            line-height: 1.8;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .institution-name {
+            font-size: 22px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .document-title {
+            font-size: 20px;
+            font-weight: bold;
+            margin-top: 30px;
+            margin-bottom: 40px;
+            text-transform: uppercase;
+        }
+        .content {
+            text-align: justify;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        .student-info {
+            margin: 20px 0;
+            padding: 15px;
+            border: 2px solid #000;
+        }
+        .info-row {
+            margin: 10px 0;
+        }
+        .info-label {
+            font-weight: bold;
+        }
+        .courses-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 30px 0;
+            font-size: 12px;
+        }
+        .courses-table th,
+        .courses-table td {
+            border: 1px solid #000;
+            padding: 8px;
+            text-align: left;
+        }
+        .courses-table th {
+            background-color: #f0f0f0;
+            font-weight: bold;
+        }
+        .courses-table td {
+            text-align: center;
+        }
+        .courses-table td:nth-child(1),
+        .courses-table td:nth-child(2),
+        .courses-table td:nth-child(3) {
+            text-align: left;
+        }
+        .signature-section {
+            margin-top: 80px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .signature-box {
+            width: 45%;
+            text-align: center;
+        }
+        .signature-line {
+            border-top: 1px solid #000;
+            margin-top: 60px;
+            padding-top: 5px;
+        }
+        .footer {
+            margin-top: 50px;
+            font-size: 10px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="institution-name">CENTRO UNIVERSITARIO DE SAN CRISTÓBAL</div>
+        <p style="font-size: 14px;">Reconocimiento de Validez Oficial de Estudios</p>
+        {% if student.career.cct %}
+        <p style="font-size: 12px;">CCT: {{ student.career.cct }}</p>
+        {% endif %}
+    </div>
+    
+    <div class="document-title">
+        Certificado de Cursos Aprobados
+    </div>
+    
+    <div class="content">
+        <p>La presente institución educativa certifica que:</p>
+        
+        <div class="student-info">
+            <div class="info-row">
+                <span class="info-label">Nombre completo:</span> <strong>{{ student.get_full_name|upper }}</strong>
+            </div>
+            <div class="info-row">
+                <span class="info-label">CURP:</span> {{ student.curp }}
+            </div>
+            <div class="info-row">
+                <span class="info-label">Carnet:</span> {{ student.carnet }}
+            </div>
+            <div class="info-row">
+                <span class="info-label">Carrera:</span> {{ student.career.name }}
+            </div>
+            <div class="info-row">
+                <span class="info-label">Certificado:</span> {{ certificate.certificate_name }}
+            </div>
+        </div>
+        
+        <p style="margin-top: 30px;">
+            Ha aprobado satisfactoriamente los siguientes cursos, obteniendo las calificaciones que se indican:
+        </p>
+        
+        <table class="courses-table">
+            <thead>
+                <tr>
+                    <th style="width: 10%;">No.</th>
+                    <th style="width: 15%;">Código</th>
+                    <th style="width: 45%;">Nombre del Curso</th>
+                    <th style="width: 10%;">Cuatrimestre</th>
+                    <th style="width: 10%;">Créditos</th>
+                    <th style="width: 10%;">Calificación</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for enrollment in enrollments %}
+                <tr>
+                    <td>{{ forloop.counter }}</td>
+                    <td>{{ enrollment.course.code }}</td>
+                    <td>{{ enrollment.course.name }}</td>
+                    <td>{{ enrollment.course.cuatrimestre.number }}</td>
+                    <td>{{ enrollment.course.credits }}</td>
+                    <td><strong>{{ enrollment.final_grade|floatformat:2 }}</strong></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td colspan="4" style="text-align: right; font-weight: bold;">Total de cursos aprobados:</td>
+                    <td><strong>{{ certificate.total_courses }}</strong></td>
+                    <td></td>
+                </tr>
+                {% if certificate.average_grade %}
+                <tr>
+                    <td colspan="4" style="text-align: right; font-weight: bold;">Promedio general:</td>
+                    <td></td>
+                    <td><strong>{{ certificate.average_grade|floatformat:2 }}</strong></td>
+                </tr>
+                {% endif %}
+            </tfoot>
+        </table>
+        
+        <p style="margin-top: 30px;">
+            Este certificado se expide el día <strong>{{ issuance_date_formatted }}</strong> en la ciudad de 
+            San Cristóbal, Chiapas, México, para los fines que al interesado convengan.
+        </p>
+    </div>
+    
+    <div class="signature-section">
+        <div class="signature-box">
+            <p><strong>VO. BO.</strong></p>
+            <div class="signature-line">
+                <p>Rector o Director Académico</p>
+            </div>
+        </div>
+        <div class="signature-box">
+            <p><strong>SELLO DE LA INSTITUCIÓN</strong></p>
+            <div class="signature-line">
+                <p>Secretaría Académica</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="footer">
+        <p>Este documento certifica los cursos aprobados por el estudiante según los registros académicos de la institución.</p>
+        <p>Fecha de emisión: {{ current_date }}</p>
+    </div>
+</body>
+</html>
+
+
+
+
+
+

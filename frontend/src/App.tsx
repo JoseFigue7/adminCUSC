@@ -5,12 +5,16 @@ import Dashboard from './components/Dashboard';
 import StudentList from './components/StudentList';
 import StudentForm from './components/StudentForm';
 import StudentDetail from './components/StudentDetail';
+import EnrollmentForm from './components/EnrollmentForm';
+import ContractManagement from './components/ContractManagement';
 import PaymentList from './components/PaymentList';
 import PaymentForm from './components/PaymentForm';
 import AcademicProgress from './components/AcademicProgress';
 import CourseEnrollment from './components/CourseEnrollment';
+import CuatrimestreEnrollment from './components/CuatrimestreEnrollment';
 import CareerPensum from './components/CareerPensum';
 import ThesisManagement from './components/ThesisManagement';
+import GradeUpload from './components/GradeUpload';
 import ScholarshipManagement from './components/ScholarshipManagement';
 import Reports from './components/Reports';
 import Login from './components/Login';
@@ -70,9 +74,8 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       {isAuthenticated && (
         <header className="app-header">
           <div className="app-header-content">
-            <div>
-              <h1>AdminCUSC</h1>
-              <p className="app-subtitle">Sistema de Gestión Estudiantil</p>
+            <div className="app-header-brand">
+              <img src="/SC Logo.png" alt="AdminCUSC Logo" className="app-logo" />
             </div>
             <Navigation />
           </div>
@@ -156,11 +159,16 @@ function AppContent() {
             <Route path="/students" element={<ProtectedRoute requirePermission="manage_students"><StudentList /></ProtectedRoute>} />
             <Route path="/students/new" element={<ProtectedRoute requirePermission="manage_students"><StudentForm /></ProtectedRoute>} />
             <Route path="/students/:id/edit" element={<ProtectedRoute requirePermission="manage_students"><StudentForm /></ProtectedRoute>} />
+            <Route path="/enrollments/new" element={<ProtectedRoute requirePermission="manage_students"><EnrollmentForm /></ProtectedRoute>} />
+            <Route path="/enrollments/:id/edit" element={<ProtectedRoute requirePermission="manage_students"><EnrollmentForm /></ProtectedRoute>} />
+            <Route path="/enrollments/:id/contract" element={<ProtectedRoute requirePermission="manage_students"><ContractManagement /></ProtectedRoute>} />
             <Route path="/students/:id" element={<ProtectedRoute requirePermission="manage_students"><StudentDetail /></ProtectedRoute>} />
             <Route path="/payments" element={<ProtectedRoute requirePermission="manage_payments"><PaymentList /></ProtectedRoute>} />
             <Route path="/payments/new" element={<ProtectedRoute requirePermission="manage_payments"><PaymentForm /></ProtectedRoute>} />
             <Route path="/academics" element={<ProtectedRoute requirePermission="manage_academics"><AcademicProgress /></ProtectedRoute>} />
             <Route path="/courses/enroll" element={<ProtectedRoute requirePermission="manage_academics"><CourseEnrollment /></ProtectedRoute>} />
+            <Route path="/cuatrimestre-enrollments" element={<ProtectedRoute requirePermission="manage_academics"><CuatrimestreEnrollment /></ProtectedRoute>} />
+            <Route path="/grades/upload" element={<ProtectedRoute requirePermission="manage_academics"><GradeUpload /></ProtectedRoute>} />
             <Route path="/careers/:id/pensum" element={<ProtectedRoute requirePermission="manage_academics"><CareerPensum /></ProtectedRoute>} />
             <Route path="/thesis" element={<ProtectedRoute requirePermission="manage_thesis"><ThesisManagement /></ProtectedRoute>} />
             <Route path="/scholarships" element={<ProtectedRoute requirePermission="manage_scholarships"><ScholarshipManagement /></ProtectedRoute>} />

@@ -55,6 +55,18 @@
   margin: 0;
 }
 
+.enrollment-actions {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.enrollment-actions .btn {
+  flex: 1;
+  min-width: 200px;
+}
+
 .documents-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -115,6 +127,146 @@
   color: #2c5282;
 }
 
+.contract-section {
+  border-top: 1px solid var(--gray-200);
+  padding-top: 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.contract-section:first-child {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.contract-section h3 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--gray-800);
+  margin: 0 0 1rem 0;
+}
+
+.contract-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.contract-actions .btn {
+  width: 100%;
+  max-width: 300px;
+}
+
+.contract-help-text {
+  font-size: 0.875rem;
+  color: var(--gray-600);
+  margin: 0.5rem 0 0 0;
+  line-height: 1.5;
+}
+
+.contract-status-message {
+  font-size: 0.9375rem;
+  color: var(--gray-600);
+  margin: 0;
+  padding: 1rem;
+  background: var(--gray-50);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--gray-200);
+}
+
+.contract-scanned-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.contract-scanned-info .btn {
+  width: 100%;
+  max-width: 300px;
+}
+
+.contract-upload-date {
+  font-size: 0.875rem;
+  color: var(--gray-600);
+  margin: 0;
+}
+
+.contract-official-status {
+  display: flex;
+  align-items: center;
+  font-size: 0.9375rem;
+  color: var(--success-color);
+  font-weight: 600;
+  margin: 0.5rem 0 0 0;
+  padding: 0.5rem;
+  background: rgba(34, 197, 94, 0.1);
+  border-radius: var(--radius-sm);
+}
+
+.contract-pending-status {
+  font-size: 0.9375rem;
+  color: var(--warning-color);
+  font-weight: 600;
+  margin: 0.5rem 0 0 0;
+  padding: 0.5rem;
+  background: rgba(251, 191, 36, 0.1);
+  border-radius: var(--radius-sm);
+}
+
+.contract-upload-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.contract-upload-section .btn {
+  width: 100%;
+  max-width: 300px;
+}
+
+.contract-upload-section .btn.disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.enrollment-official {
+  display: flex;
+  align-items: center;
+  font-size: 0.9375rem;
+  color: var(--success-color);
+  font-weight: 600;
+  margin: 0.5rem 0 0 0;
+  padding: 0.5rem;
+  background: rgba(34, 197, 94, 0.1);
+  border-radius: var(--radius-sm);
+}
+
+.document-physical-record {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+}
+
+.document-physical-record p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.document-upload {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.document-upload .btn.disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 @media (max-width: 768px) {
   .detail-grid {
     grid-template-columns: 1fr;
@@ -130,6 +282,12 @@
 
   .header-actions .btn {
     flex: 1;
+  }
+
+  .contract-actions .btn,
+  .contract-scanned-info .btn,
+  .contract-upload-section .btn {
+    max-width: 100%;
   }
 }
 

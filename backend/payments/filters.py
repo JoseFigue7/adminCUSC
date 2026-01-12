@@ -21,6 +21,7 @@ class PaymentFilter(django_filters.FilterSet):
     
     # Filtros por estado y método
     status = django_filters.ChoiceFilter(choices=Payment.STATUS_CHOICES, label='Estado')
+    pending = django_filters.BooleanFilter(method='filter_pending', label='Pendientes')
     payment_method = django_filters.ChoiceFilter(choices=Payment.PAYMENT_METHODS, label='Método de pago')
     payment_type = django_filters.UUIDFilter(field_name='payment_type', label='Tipo de pago')
     
@@ -49,6 +50,7 @@ class PaymentFilter(django_filters.FilterSet):
                 Q(student__last_name__icontains=value) |
                 Q(student__email__icontains=value) |
                 Q(receipt_number__icontains=value) |
+                Q(payment_reference__icontains=value) |
                 Q(transaction_id__icontains=value) |
                 Q(notes__icontains=value) |
                 Q(payment_type__name__icontains=value) |
@@ -63,4 +65,11 @@ class PaymentFilter(django_filters.FilterSet):
                 Q(student__first_name__icontains=value) |
                 Q(student__last_name__icontains=value)
             )
+        return queryset
+    
+    def filter_pending(self, queryset, name, value):
+        """Filtrar por pagos pendientes (PENDIENTE y EN_REVISION)"""
+        # Manejar tanto booleanos como strings ('true', 'True', '1', etc.)
+        if value in (True, 'true', 'True', '1', 1):
+            return queryset.filter(status__in=['PENDIENTE', 'EN_REVISION'])
         return queryset

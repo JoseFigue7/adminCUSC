@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { getStudentByCarnet, getPaymentTypes, processPublicPayment } from '../services/api';
+import { getStudentByCarnet, getPaymentTypes } from '../services/api';
+import StripePaymentForm from './StripePaymentForm';
 import './PublicPayment.css';
 
 interface Student {
@@ -44,12 +45,6 @@ const PublicPayment: React.FC = () => {
   const [year, setYear] = useState('');
   const [semester, setSemester] = useState('');
   const [quantity, setQuantity] = useState('');
-  
-  // Card fields
-  const [cardNumber, setCardNumber] = useState('');
-  const [cardName, setCardName] = useState('');
-  const [cardExpiry, setCardExpiry] = useState('');
-  const [cardCvv, setCardCvv] = useState('');
 
   useEffect(() => {
     loadPaymentTypes();
@@ -102,42 +97,6 @@ const PublicPayment: React.FC = () => {
     }
   };
 
-  const formatCardNumber = (value: string) => {
-    const v = value.replace(/\s+/g, '').replace(/[^0-9]/gi, '');
-    const matches = v.match(/\d{4,16}/g);
-    const match = matches && matches[0] || '';
-    const parts = [];
-    for (let i = 0, len = match.length; i < len; i += 4) {
-      parts.push(match.substring(i, i + 4));
-    }
-    if (parts.length) {
-      return parts.join(' ');
-    } else {
-      return v;
-    }
-  };
-
-  const formatExpiry = (value: string) => {
-    const v = value.replace(/\D/g, '');
-    if (v.length >= 2) {
-      return v.substring(0, 2) + '/' + v.substring(2, 4);
-    }
-    return v;
-  };
-
-  const handleCardNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setCardNumber(formatCardNumber(e.target.value));
-  };
-
-  const handleCardExpiryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setCardExpiry(formatExpiry(e.target.value));
-  };
-
-  const handleCardCvvChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const v = e.target.value.replace(/\D/g, '').substring(0, 3);
-    setCardCvv(v);
-  };
-
   const validateForm = (): boolean => {
     if (!selectedPaymentType) {
       setError('Por favor seleccione un tipo de pago');
@@ -169,78 +128,17 @@ const PublicPayment: React.FC = () => {
       return false;
     }
 
-    // Validate card
-    const cardNumberClean = cardNumber.replace(/\s/g, '');
-    if (cardNumberClean.length < 13 || cardNumberClean.length > 19) {
-      setError('Por favor ingrese un número de tarjeta válido');
-      return false;
-    }
-
-    if (!cardName.trim()) {
-      setError('Por favor ingrese el nombre del titular de la tarjeta');
-      return false;
-    }
-
-    if (!cardExpiry || cardExpiry.length !== 5) {
-      setError('Por favor ingrese una fecha de expiración válida (MM/AA)');
-      return false;
-    }
-
-    if (!cardCvv || cardCvv.length !== 3) {
-      setError('Por favor ingrese un CVV válido');
-      return false;
-    }
-
     return true;
   };
 
-  const handlePaymentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handlePaymentSuccess = (data: any) => {
+    setSuccess(true);
+    setStep('success');
     setError('');
+  };
 
-    if (!validateForm()) {
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      // En producción, aquí se generaría un token seguro de la tarjeta usando una pasarela de pago
-      // Por ahora, simulamos el token (en producción usar Stripe, PayPal, etc.)
-      const cardToken = `tok_${cardNumber.replace(/\s/g, '').slice(-4)}_${Date.now()}`;
-
-      const paymentData: any = {
-        carnet: carnet,
-        payment_type: selectedPaymentType!.id,
-        amount: parseFloat(amount),
-        card_token: cardToken,
-      };
-
-      if (selectedPaymentType!.requires_month && month) {
-        paymentData.month = parseInt(month);
-      }
-
-      if (selectedPaymentType!.requires_year && year) {
-        paymentData.year = parseInt(year);
-      }
-
-      if (selectedPaymentType!.requires_semester && semester) {
-        paymentData.semester = parseInt(semester);
-      }
-
-      if (selectedPaymentType!.requires_quantity && quantity) {
-        paymentData.quantity = parseInt(quantity);
-      }
-
-      const response = await processPublicPayment(paymentData);
-      
-      setSuccess(true);
-      setStep('success');
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Error al procesar el pago. Por favor intente nuevamente.');
-    } finally {
-      setLoading(false);
-    }
+  const handlePaymentError = (errorMessage: string) => {
+    setError(errorMessage);
   };
 
   const months = [
@@ -298,7 +196,7 @@ const PublicPayment: React.FC = () => {
               <p><strong>Carrera:</strong> {student.career.name}</p>
             </div>
 
-            <form onSubmit={handlePaymentSubmit} className="payment-form">
+            <div className="payment-form-container">
               <div className="form-group">
                 <label htmlFor="payment_type">Tipo de Pago</label>
                 <select
@@ -410,84 +308,46 @@ const PublicPayment: React.FC = () => {
                     </div>
                   )}
 
-                  <div className="card-section">
-                    <h3>Información de la Tarjeta</h3>
-                    
-                    <div className="form-group">
-                      <label htmlFor="card_number">Número de Tarjeta</label>
-                      <input
-                        type="text"
-                        id="card_number"
-                        value={cardNumber}
-                        onChange={handleCardNumberChange}
-                        placeholder="1234 5678 9012 3456"
-                        maxLength={19}
-                        required
+                  {validateForm() && (
+                    <div className="stripe-payment-wrapper">
+                      <StripePaymentForm
+                        carnet={carnet}
+                        paymentTypeId={selectedPaymentType.id}
+                        amount={parseFloat(amount)}
+                        month={month ? parseInt(month) : undefined}
+                        year={year ? parseInt(year) : undefined}
+                        semester={semester ? parseInt(semester) : undefined}
+                        quantity={quantity ? parseInt(quantity) : undefined}
+                        onSuccess={handlePaymentSuccess}
+                        onError={handlePaymentError}
                       />
                     </div>
+                  )}
 
-                    <div className="form-group">
-                      <label htmlFor="card_name">Nombre del Titular</label>
-                      <input
-                        type="text"
-                        id="card_name"
-                        value={cardName}
-                        onChange={(e) => setCardName(e.target.value)}
-                        placeholder="Como aparece en la tarjeta"
-                        required
-                      />
-                    </div>
+                  {error && <div className="error-message">{error}</div>}
 
-                    <div className="form-row">
-                      <div className="form-group">
-                        <label htmlFor="card_expiry">Fecha de Expiración</label>
-                        <input
-                          type="text"
-                          id="card_expiry"
-                          value={cardExpiry}
-                          onChange={handleCardExpiryChange}
-                          placeholder="MM/AA"
-                          maxLength={5}
-                          required
-                        />
-                      </div>
-
-                      <div className="form-group">
-                        <label htmlFor="card_cvv">CVV</label>
-                        <input
-                          type="text"
-                          id="card_cvv"
-                          value={cardCvv}
-                          onChange={handleCardCvvChange}
-                          placeholder="123"
-                          maxLength={3}
-                          required
-                        />
-                      </div>
-                    </div>
+                  <div className="form-actions">
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        setStep('carnet');
+                        setError('');
+                        setStudent(null);
+                        setSelectedPaymentType(null);
+                        setAmount('');
+                        setMonth('');
+                        setYear('');
+                        setSemester('');
+                        setQuantity('');
+                      }}
+                    >
+                      Volver
+                    </button>
                   </div>
                 </>
               )}
-
-              {error && <div className="error-message">{error}</div>}
-
-              <div className="form-actions">
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => {
-                    setStep('carnet');
-                    setError('');
-                    setStudent(null);
-                  }}
-                >
-                  Volver
-                </button>
-                <button type="submit" className="btn btn-primary" disabled={loading || !selectedPaymentType}>
-                  {loading ? 'Procesando...' : 'Generar Boleta'}
-                </button>
-              </div>
-            </form>
+            </div>
           </div>
         )}
 
@@ -510,10 +370,6 @@ const PublicPayment: React.FC = () => {
                 setYear('');
                 setSemester('');
                 setQuantity('');
-                setCardNumber('');
-                setCardName('');
-                setCardExpiry('');
-                setCardCvv('');
               }}
             >
               Realizar Otro Pago

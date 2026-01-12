@@ -54,7 +54,7 @@ const Login: React.FC = () => {
     <div className="auth-container">
       <div className="auth-card">
         <div className="auth-header">
-          <FiLogIn className="auth-icon" />
+          <img src="/SC Logo.png" alt="AdminCUSC Logo" className="auth-logo" />
           <h1>Iniciar Sesión</h1>
           <p>Ingresa tus credenciales para acceder al sistema</p>
         </div>

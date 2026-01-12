@@ -19,7 +19,12 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-change-this-in-produc
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=True, cast=bool)
 
-ALLOWED_HOSTS = ['*']
+# ALLOWED_HOSTS debe ser configurado para producción
+ALLOWED_HOSTS = config(
+    'ALLOWED_HOSTS',
+    default='localhost,127.0.0.1' if DEBUG else '',
+    cast=lambda v: [s.strip() for s in v.split(',') if s.strip()]
+)
 
 
 # Application definition
@@ -42,6 +47,8 @@ INSTALLED_APPS = [
     'academics',
     'payments',
     'documents',
+    'certificates',
+    'reports',
 ]
 
 MIDDLEWARE = [
@@ -142,6 +149,14 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 MEDIA_URL = 'media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
+# Configuración de seguridad adicional
+# Tamaño máximo de archivo subido (10MB)
+DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10MB
+
+# Tamaño máximo de request body
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 1000
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
@@ -157,7 +172,7 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.AllowAny',  # Temporal hasta resolver migraciones
+        'rest_framework.permissions.IsAuthenticated',  # Cambiar a IsAuthenticated por defecto
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
@@ -166,6 +181,7 @@ REST_FRAMEWORK = {
         'rest_framework.filters.SearchFilter',
         'rest_framework.filters.OrderingFilter',
     ],
+    'EXCEPTION_HANDLER': 'rest_framework.views.exception_handler',
 }
 
 # JWT Settings
@@ -247,6 +263,11 @@ JAZZMIN_SETTINGS = {
         "payments.Scholarship": "fas fa-gift",
         "payments.PaymentConfiguration": "fas fa-cog",
         "documents.DocumentTemplate": "fas fa-file-signature",
+        "certificates.RegistrationStatus": "fas fa-list-check",
+        "certificates.DocumentType": "fas fa-file-alt",
+        "certificates.AcademicCertificate": "fas fa-certificate",
+        "certificates.CourseCertificate": "fas fa-certificate",
+        "certificates.UniversityTitle": "fas fa-graduation-cap",
     },
     "default_icon_parents": "fas fa-chevron-circle-right",
     "default_icon_children": "fas fa-circle",

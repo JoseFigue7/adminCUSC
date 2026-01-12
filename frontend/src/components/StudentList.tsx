@@ -11,7 +11,9 @@ interface Student {
   id: string;
   carnet: string;
   first_name: string;
-  last_name: string;
+  last_name?: string;
+  first_last_name?: string;
+  second_last_name?: string;
   email: string;
   career_name: string;
   is_active: boolean;
@@ -134,7 +136,7 @@ const StudentList: React.FC = () => {
                     </td>
                     <td>
                       <div className="student-name">
-                        <strong>{student.full_name || `${student.first_name} ${student.last_name}`}</strong>
+                        <strong>{student.full_name || `${student.first_name} ${student.first_last_name || student.last_name || ''} ${student.second_last_name || ''}`.trim()}</strong>
                       </div>
                     </td>
                     <td className="email-cell">{student.email}</td>

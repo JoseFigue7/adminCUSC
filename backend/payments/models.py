@@ -61,8 +61,11 @@ class Payment(models.Model):
         verbose_name='Monto base (sin mora)'
     )
     
-    # Para transferencias
-    transfer_receipt = models.FileField(upload_to='payment_receipts/', null=True, blank=True, verbose_name='Comprobante de transferencia')
+    # Referencia del pago (número de recibo, referencia de transferencia, número de tarjeta, etc.)
+    payment_reference = models.CharField(max_length=100, blank=True, verbose_name='Referencia de pago')
+    
+    # Comprobante de pago (imagen/PDF) - disponible para todos los métodos
+    transfer_receipt = models.FileField(upload_to='payment_receipts/', null=True, blank=True, verbose_name='Comprobante de pago')
     
     # Para efectivo
     receipt_number = models.CharField(max_length=50, blank=True, verbose_name='Número de recibo')

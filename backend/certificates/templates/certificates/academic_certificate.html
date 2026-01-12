@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Certificado Académico</title>
+    <style>
+        body {
+            font-family: "Times New Roman", serif;
+            margin: 60px;
+            line-height: 1.8;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .institution-name {
+            font-size: 22px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .document-title {
+            font-size: 20px;
+            font-weight: bold;
+            margin-top: 30px;
+            margin-bottom: 40px;
+            text-transform: uppercase;
+        }
+        .content {
+            text-align: justify;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        .student-info {
+            margin: 20px 0;
+            padding: 15px;
+            border: 2px solid #000;
+        }
+        .info-row {
+            margin: 10px 0;
+            display: flex;
+        }
+        .info-label {
+            font-weight: bold;
+            width: 250px;
+        }
+        .info-value {
+            flex: 1;
+        }
+        .signature-section {
+            margin-top: 80px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .signature-box {
+            width: 45%;
+            text-align: center;
+        }
+        .signature-line {
+            border-top: 1px solid #000;
+            margin-top: 60px;
+            padding-top: 5px;
+        }
+        .footer {
+            margin-top: 50px;
+            font-size: 10px;
+            text-align: center;
+        }
+        .folio {
+            text-align: right;
+            margin-top: 20px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="institution-name">CENTRO UNIVERSITARIO DE SAN CRISTÓBAL</div>
+        <p style="font-size: 14px;">Reconocimiento de Validez Oficial de Estudios</p>
+        {% if certificate.student.career.cct %}
+        <p style="font-size: 12px;">CCT: {{ certificate.student.career.cct }}</p>
+        {% endif %}
+    </div>
+    
+    <div class="document-title">
+        {{ certificate.get_registration_status_display|upper }}
+    </div>
+    
+    <div class="content">
+        <p>La presente institución educativa certifica que:</p>
+        
+        <div class="student-info">
+            <div class="info-row">
+                <span class="info-label">Nombre completo:</span>
+                <span class="info-value"><strong>{{ student.get_full_name|upper }}</strong></span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">CURP:</span>
+                <span class="info-value">{{ certificate.curp }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Carnet:</span>
+                <span class="info-value">{{ student.carnet }}</span>
+            </div>
+            {% if student.date_of_birth %}
+            <div class="info-row">
+                <span class="info-label">Fecha de nacimiento:</span>
+                <span class="info-value">{{ student.date_of_birth|date:"d \d\e F \d\e Y" }}</span>
+            </div>
+            {% endif %}
+            <div class="info-row">
+                <span class="info-label">Carrera:</span>
+                <span class="info-value">{{ student.career.name }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Año del ciclo escolar:</span>
+                <span class="info-value">{{ certificate.school_year }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Tipo de documento:</span>
+                <span class="info-value">{{ certificate.get_document_type_display }}</span>
+            </div>
+            {% if certificate.general_average %}
+            <div class="info-row">
+                <span class="info-label">Promedio general:</span>
+                <span class="info-value">{{ certificate.general_average|floatformat:2 }}</span>
+            </div>
+            {% endif %}
+        </div>
+        
+        <p style="margin-top: 30px;">
+            Ha cumplido satisfactoriamente con los requisitos académicos establecidos en el plan de estudios 
+            de la carrera de <strong>{{ student.career.name }}</strong> correspondiente al ciclo escolar 
+            <strong>{{ certificate.school_year }}</strong>.
+        </p>
+        
+        <p>
+            Este documento se expide el día <strong>{{ issuance_date_formatted }}</strong> en la ciudad de 
+            San Cristóbal, Chiapas, México, para los fines que al interesado convengan.
+        </p>
+    </div>
+    
+    <div class="folio">
+        <p><strong>Folio del documento:</strong> {{ certificate.document_folio }}</p>
+        {% if certificate.is_sep_registered %}
+        <p><strong>Registrado en SEP:</strong> Sí</p>
+        {% if certificate.sep_registration_date %}
+        <p><strong>Fecha de registro SEP:</strong> {{ certificate.sep_registration_date|date:"d \d\e F \d\e Y" }}</p>
+        {% endif %}
+        {% endif %}
+    </div>
+    
+    <div class="signature-section">
+        <div class="signature-box">
+            <p><strong>VO. BO.</strong></p>
+            <div class="signature-line">
+                <p>Rector o Director Académico</p>
+            </div>
+        </div>
+        <div class="signature-box">
+            <p><strong>SELLO DE LA INSTITUCIÓN</strong></p>
+            <div class="signature-line">
+                <p>Secretaría Académica</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="footer">
+        <p>Este documento es oficial y tiene validez académica según las normas establecidas por la Secretaría de Educación Pública.</p>
+        <p>Fecha de emisión: {{ current_date }}</p>
+    </div>
+</body>
+</html>
+
+
+
+
+
+

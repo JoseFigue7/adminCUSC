@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Título Universitario</title>
+    <style>
+        body {
+            font-family: "Times New Roman", serif;
+            margin: 60px;
+            line-height: 1.8;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .institution-name {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            letter-spacing: 2px;
+        }
+        .document-title {
+            font-size: 22px;
+            font-weight: bold;
+            margin-top: 40px;
+            margin-bottom: 50px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .content {
+            text-align: justify;
+            margin-bottom: 30px;
+            font-size: 15px;
+        }
+        .student-info {
+            margin: 30px 0;
+            padding: 20px;
+            border: 3px solid #000;
+            background-color: #fafafa;
+        }
+        .info-row {
+            margin: 15px 0;
+            font-size: 14px;
+        }
+        .info-label {
+            font-weight: bold;
+            display: inline-block;
+            width: 250px;
+        }
+        .academic-summary {
+            margin: 30px 0;
+            padding: 15px;
+            border: 1px solid #000;
+        }
+        .courses-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 30px 0;
+            font-size: 11px;
+        }
+        .courses-table th,
+        .courses-table td {
+            border: 1px solid #000;
+            padding: 6px;
+            text-align: left;
+        }
+        .courses-table th {
+            background-color: #e0e0e0;
+            font-weight: bold;
+        }
+        .courses-table td {
+            text-align: center;
+        }
+        .courses-table td:nth-child(1),
+        .courses-table td:nth-child(2),
+        .courses-table td:nth-child(3) {
+            text-align: left;
+        }
+        .signature-section {
+            margin-top: 100px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .signature-box {
+            width: 45%;
+            text-align: center;
+        }
+        .signature-line {
+            border-top: 2px solid #000;
+            margin-top: 80px;
+            padding-top: 8px;
+        }
+        .seal {
+            margin-top: 40px;
+            text-align: center;
+        }
+        .footer {
+            margin-top: 60px;
+            font-size: 10px;
+            text-align: center;
+        }
+        .requirements-check {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f0f0f0;
+        }
+        .requirement-item {
+            margin: 8px 0;
+        }
+        .requirement-item::before {
+            content: "✓ ";
+            color: green;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="institution-name">CENTRO UNIVERSITARIO DE SAN CRISTÓBAL</div>
+        <p style="font-size: 14px;">Reconocimiento de Validez Oficial de Estudios</p>
+        {% if career.cct %}
+        <p style="font-size: 12px;">CCT: {{ career.cct }}</p>
+        {% endif %}
+        {% if career.rvoe_agreement_number %}
+        <p style="font-size: 11px;">RVOE: {{ career.rvoe_agreement_number }}</p>
+        {% endif %}
+    </div>
+    
+    <div class="document-title">
+        Título Universitario
+    </div>
+    
+    <div class="content">
+        <p style="text-align: center; font-size: 16px; margin-bottom: 30px;">
+            <strong>OTORGA</strong>
+        </p>
+        
+        <p>
+            El presente documento certifica que <strong>{{ student.get_full_name|upper }}</strong>, 
+            identificado(a) con CURP <strong>{{ student.curp }}</strong> y carnet <strong>{{ student.carnet }}</strong>,
+            {% if student.date_of_birth %}nacido(a) el {{ student.date_of_birth|date:"d \d\e F \d\e Y" }},{% endif %}
+            ha cumplido satisfactoriamente con todos los requisitos académicos establecidos en el plan de estudios 
+            de la carrera de <strong>{{ title.title_name|upper }}</strong>, correspondiente a 
+            <strong>{{ career.name|upper }}</strong>.
+        </p>
+        
+        <div class="academic-summary">
+            <h3 style="text-align: center; margin-bottom: 20px;">RESUMEN ACADÉMICO</h3>
+            
+            <div class="info-row">
+                <span class="info-label">Carrera:</span> {{ career.name }}
+            </div>
+            {% if career.rvoe_agreement_number %}
+            <div class="info-row">
+                <span class="info-label">RVOE:</span> {{ career.rvoe_agreement_number }}
+            </div>
+            {% endif %}
+            {% if title.average_grade %}
+            <div class="info-row">
+                <span class="info-label">Promedio general:</span> {{ title.average_grade|floatformat:2 }}
+            </div>
+            {% endif %}
+            <div class="info-row">
+                <span class="info-label">Total de cursos aprobados:</span> {{ enrollments|length }}
+            </div>
+            {% if title.thesis_approved %}
+            <div class="info-row">
+                <span class="info-label">Tesis:</span> Aprobada
+            </div>
+            {% endif %}
+        </div>
+        
+        <div class="requirements-check">
+            <h4 style="margin-bottom: 15px;">Requisitos Cumplidos:</h4>
+            <div class="requirement-item">Pensum completado</div>
+            <div class="requirement-item">Todos los cursos requeridos aprobados</div>
+            {% if title.thesis_approved %}
+            <div class="requirement-item">Tesis aprobada</div>
+            {% endif %}
+            {% if title.average_grade %}
+            <div class="requirement-item">Promedio general: {{ title.average_grade|floatformat:2 }}</div>
+            {% endif %}
+        </div>
+        
+        <p style="margin-top: 30px;">
+            En virtud de lo anterior, y de conformidad con las disposiciones legales aplicables, se le otorga el 
+            <strong>{{ title.title_name|upper }}</strong> con todas las prerrogativas, derechos y obligaciones que 
+            la ley confiere.
+        </p>
+        
+        <p style="margin-top: 30px;">
+            Este título se expide el día <strong>{{ issuance_date_formatted }}</strong> en la ciudad de 
+            San Cristóbal, Chiapas, México.
+        </p>
+    </div>
+    
+    {% if enrollments %}
+    <div style="margin-top: 40px;">
+        <h3 style="text-align: center; margin-bottom: 20px; font-size: 14px;">HISTORIAL ACADÉMICO COMPLETO</h3>
+        <table class="courses-table">
+            <thead>
+                <tr>
+                    <th style="width: 5%;">No.</th>
+                    <th style="width: 12%;">Código</th>
+                    <th style="width: 40%;">Nombre del Curso</th>
+                    <th style="width: 10%;">Cuatrimestre</th>
+                    <th style="width: 8%;">Créditos</th>
+                    <th style="width: 10%;">Calificación</th>
+                    <th style="width: 15%;">Estado</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for enrollment in enrollments %}
+                <tr>
+                    <td>{{ forloop.counter }}</td>
+                    <td>{{ enrollment.course.code }}</td>
+                    <td>{{ enrollment.course.name }}</td>
+                    <td>{{ enrollment.course.cuatrimestre.number }}</td>
+                    <td>{{ enrollment.course.credits }}</td>
+                    <td><strong>{{ enrollment.final_grade|floatformat:2 }}</strong></td>
+                    <td>{{ enrollment.get_status_display }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    
+    <div class="signature-section">
+        <div class="signature-box">
+            <p><strong>VO. BO.</strong></p>
+            <div class="signature-line">
+                <p style="font-weight: bold; font-size: 14px;">Rector</p>
+                <p>Centro Universitario de San Cristóbal</p>
+            </div>
+        </div>
+        <div class="signature-box">
+            <p><strong>SELLO DE LA INSTITUCIÓN</strong></p>
+            <div class="signature-line">
+                <p style="font-weight: bold; font-size: 14px;">Secretario Académico</p>
+                <p>Centro Universitario de San Cristóbal</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="seal">
+        <p style="font-size: 12px; font-weight: bold;">SELLO OFICIAL DE LA INSTITUCIÓN</p>
+        <p style="font-size: 10px;">Este documento tiene validez académica y legal según las normas establecidas por la Secretaría de Educación Pública.</p>
+    </div>
+    
+    <div class="footer">
+        <p>Este título universitario es oficial y tiene validez académica y profesional según las disposiciones legales aplicables.</p>
+        <p>Fecha de emisión: {{ current_date }}</p>
+        {% if title.academic_certificate %}
+        <p>Certificado académico SEP asociado: Folio {{ title.academic_certificate.document_folio }}</p>
+        {% endif %}
+    </div>
+</body>
+</html>
+
+
+
+
+
+

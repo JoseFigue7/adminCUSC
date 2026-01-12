@@ -85,9 +85,9 @@ Stripe proporciona tarjetas de prueba para el modo de testing:
 
 ## 7. Moneda
 
-El sistema está configurado para usar **GTQ (Quetzales guatemaltecos)**. Si necesitas cambiar la moneda, actualiza:
+El sistema está configurado para usar **MXN (Pesos mexicanos)**. Si necesitas cambiar la moneda, actualiza:
 
-- `backend/payments/views.py`: Cambia `currency='gtq'` en `create_payment_intent`
+- `backend/payments/views.py`: Cambia `currency='mxn'` en `create_payment_intent`
 - `backend/payments/stripe_service.py`: Ajusta la conversión de centavos según la moneda
 
 ## 8. Webhooks (Opcional)
@@ -139,9 +139,8 @@ Para recibir notificaciones de Stripe sobre pagos:
 - Asegúrate de usar claves de prueba en desarrollo y claves de producción en producción
 
 ### Error: "Currency not supported"
-- Stripe puede no soportar GTQ en todas las regiones
-- Considera usar USD si GTQ no está disponible en tu región
-- Verifica en [Stripe Docs](https://stripe.com/docs/currencies) qué monedas están disponibles
+- Stripe soporta MXN (Pesos mexicanos) en México
+- Si necesitas otra moneda, verifica en [Stripe Docs](https://stripe.com/docs/currencies) qué monedas están disponibles
 
 ### El pago se procesa pero no se guarda en la BD
 - Verifica los logs del backend

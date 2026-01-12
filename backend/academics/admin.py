@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.utils.html import format_html
 from django.urls import reverse
-from .models import Career, Cuatrimestre, Course, CourseEnrollment, Thesis
+from .models import Career, Cuatrimestre, Course, CourseEnrollment, CuatrimestreEnrollment, Thesis, CourseSchedule
 
 
 class CuatrimestreInline(admin.TabularInline):
@@ -12,12 +12,29 @@ class CuatrimestreInline(admin.TabularInline):
     ordering = ('number',)
 
 
+class CourseScheduleInline(admin.TabularInline):
+    """Inline para horarios de cursos"""
+    model = CourseSchedule
+    extra = 1
+    fields = ('day', 'start_time', 'end_time')
+    ordering = ('day', 'start_time')
+
+
 class CourseInline(admin.TabularInline):
     """Inline para cursos de cuatrimestres"""
     model = Course
     extra = 0
     fields = ('code', 'name', 'credits', 'is_required', 'prerequisite')
     ordering = ('code',)
+    show_change_link = True
+
+
+class CourseEnrollmentInline(admin.TabularInline):
+    """Inline para cursos inscritos en un cuatrimestre"""
+    model = CourseEnrollment
+    extra = 0
+    fields = ('course', 'status', 'final_grade')
+    readonly_fields = ('enrollment_date',)
     show_change_link = True
 
 
@@ -41,6 +58,17 @@ class CareerAdmin(admin.ModelAdmin):
                 'total_credits',
             ),
             'classes': ('wide',),
+        }),
+        ('Información SEP - Claves', {
+            'fields': (
+                ('institution_key', 'career_key'),
+                'cct',
+            ),
+        }),
+        ('Información SEP - RVOE', {
+            'fields': (
+                ('rvoe_agreement_number', 'rvoe_agreement_date'),
+            ),
         }),
         ('Configuración de Becas', {
             'fields': (
@@ -189,6 +217,7 @@ class CourseAdmin(admin.ModelAdmin):
     search_fields = ['code', 'name']
     raw_id_fields = ['prerequisite']
     readonly_fields = ['id', 'created_at', 'updated_at', 'enrollments_count']
+    inlines = [CourseScheduleInline]
     
     fieldsets = (
         ('Información del Curso', {
@@ -292,15 +321,163 @@ class CourseAdmin(admin.ModelAdmin):
     enrollments_count.short_description = 'Matrículas'
 
 
+@admin.register(CourseSchedule)
+class CourseScheduleAdmin(admin.ModelAdmin):
+    """Admin para horarios de cursos"""
+    list_display = ['course_link', 'day', 'start_time', 'end_time', 'schedule_display']
+    list_filter = ['day', 'course__cuatrimestre', 'course__career']
+    search_fields = ['course__code', 'course__name', 'day']
+    readonly_fields = ['id', 'created_at', 'updated_at']
+    
+    fieldsets = (
+        ('Información del Horario', {
+            'fields': (
+                'course',
+                'day',
+                ('start_time', 'end_time'),
+            ),
+        }),
+        ('Información del Sistema', {
+            'fields': (
+                'id',
+                ('created_at', 'updated_at'),
+            ),
+            'classes': ('collapse',),
+        }),
+    )
+    
+    def course_link(self, obj):
+        """Link al curso"""
+        if obj.course:
+            url = reverse('admin:academics_course_change', args=[obj.course.pk])
+            return format_html(
+                '<a href="{}"><strong>{}</strong> - {}</a>',
+                url,
+                obj.course.code,
+                obj.course.name
+            )
+        return '-'
+    course_link.short_description = 'Curso'
+    course_link.admin_order_field = 'course__code'
+    
+    def schedule_display(self, obj):
+        """Mostrar horario formateado"""
+        return f"{obj.day} {obj.start_time.strftime('%H:%M')}-{obj.end_time.strftime('%H:%M')}"
+    schedule_display.short_description = 'Horario'
+    schedule_display.admin_order_field = 'day'
+
+
+@admin.register(CuatrimestreEnrollment)
+class CuatrimestreEnrollmentAdmin(admin.ModelAdmin):
+    list_display = [
+        'student_link', 'cuatrimestre_link', 'academic_year',
+        'status_badge', 'courses_count_display', 'enrollment_date'
+    ]
+    list_filter = ['status', 'academic_year', 'cuatrimestre__career', 'enrollment_date']
+    search_fields = [
+        'student__first_name', 'student__first_last_name', 
+        'cuatrimestre__name', 'cuatrimestre__career__name'
+    ]
+    raw_id_fields = ['student', 'cuatrimestre']
+    readonly_fields = ['id', 'enrollment_date', 'created_at', 'updated_at', 'courses_count']
+    inlines = [CourseEnrollmentInline]
+    
+    fieldsets = (
+        ('Información de Inscripción', {
+            'fields': (
+                'student',
+                'cuatrimestre',
+                'academic_year',
+                'enrollment_date',
+            ),
+        }),
+        ('Estado', {
+            'fields': (
+                'status',
+                'notes',
+            ),
+        }),
+        ('Estadísticas', {
+            'fields': ('courses_count',),
+            'classes': ('collapse',),
+        }),
+        ('Información del Sistema', {
+            'fields': (
+                'id',
+                ('created_at', 'updated_at'),
+            ),
+            'classes': ('collapse',),
+        }),
+    )
+    
+    def student_link(self, obj):
+        """Link al estudiante"""
+        url = reverse('admin:students_student_change', args=[obj.student.pk])
+        return format_html(
+            '<a href="{}"><strong>{}</strong> ({})</a>',
+            url,
+            obj.student.get_full_name(),
+            obj.student.carnet or 'Sin carnet'
+        )
+    student_link.short_description = 'Estudiante'
+    student_link.admin_order_field = 'student__first_name'
+    
+    def cuatrimestre_link(self, obj):
+        """Link al cuatrimestre"""
+        url = reverse('admin:academics_cuatrimestre_change', args=[obj.cuatrimestre.pk])
+        return format_html(
+            '<a href="{}"><strong>{}</strong> - {}</a>',
+            url,
+            obj.cuatrimestre.name,
+            obj.cuatrimestre.career.name
+        )
+    cuatrimestre_link.short_description = 'Cuatrimestre'
+    cuatrimestre_link.admin_order_field = 'cuatrimestre__number'
+    
+    def courses_count_display(self, obj):
+        """Cuenta de cursos inscritos"""
+        count = obj.course_enrollments.count()
+        url = f"{reverse('admin:academics_courseenrollment_changelist')}?cuatrimestre_enrollment__id__exact={obj.id}"
+        return format_html(
+            '<a href="{}">{} curso(s)</a>',
+            url,
+            count
+        )
+    courses_count_display.short_description = 'Cursos Inscritos'
+    
+    def courses_count(self, obj):
+        """Cuenta de cursos (readonly)"""
+        return obj.course_enrollments.count()
+    courses_count.short_description = 'Total de Cursos'
+    
+    def status_badge(self, obj):
+        """Badge para estado"""
+        colors = {
+            'PENDIENTE': '#ffc107',
+            'INSCRITO': '#17a2b8',
+            'EN_CURSO': '#007bff',
+            'FINALIZADO': '#28a745',
+            'CANCELADO': '#dc3545'
+        }
+        color = colors.get(obj.status, '#6c757d')
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 4px 10px; border-radius: 4px; font-weight: bold;">{}</span>',
+            color,
+            obj.get_status_display()
+        )
+    status_badge.short_description = 'Estado'
+    status_badge.admin_order_field = 'status'
+
+
 @admin.register(CourseEnrollment)
 class CourseEnrollmentAdmin(admin.ModelAdmin):
     list_display = [
-        'student_link', 'course_link', 'final_grade_display',
-        'status_badge', 'enrollment_date'
+        'student_link', 'course_link', 'cuatrimestre_enrollment_display',
+        'final_grade_display', 'status_badge', 'enrollment_date'
     ]
-    list_filter = ['status', 'course__career', 'enrollment_date']
-    search_fields = ['student__first_name', 'student__last_name', 'course__name', 'course__code']
-    raw_id_fields = ['student', 'course']
+    list_filter = ['status', 'course__career', 'cuatrimestre_enrollment', 'enrollment_date']
+    search_fields = ['student__first_name', 'student__first_last_name', 'course__name', 'course__code']
+    raw_id_fields = ['student', 'course', 'cuatrimestre_enrollment']
     readonly_fields = ['id', 'enrollment_date', 'created_at', 'updated_at']
     
     fieldsets = (
@@ -308,6 +485,7 @@ class CourseEnrollmentAdmin(admin.ModelAdmin):
             'fields': (
                 'student',
                 'course',
+                'cuatrimestre_enrollment',
                 'enrollment_date',
             ),
         }),
@@ -326,6 +504,19 @@ class CourseEnrollmentAdmin(admin.ModelAdmin):
             'classes': ('collapse',),
         }),
     )
+    
+    def cuatrimestre_enrollment_display(self, obj):
+        """Display de inscripción al cuatrimestre"""
+        if obj.cuatrimestre_enrollment:
+            url = reverse('admin:academics_cuatrimestreenrollment_change', args=[obj.cuatrimestre_enrollment.pk])
+            return format_html(
+                '<a href="{}">{}</a>',
+                url,
+                f"{obj.cuatrimestre_enrollment.cuatrimestre.name} {obj.cuatrimestre_enrollment.academic_year}"
+            )
+        return format_html('<span style="color: #999;">Sin cuatrimestre</span>')
+    cuatrimestre_enrollment_display.short_description = 'Cuatrimestre'
+    cuatrimestre_enrollment_display.admin_order_field = 'cuatrimestre_enrollment__academic_year'
     
     def student_link(self, obj):
         """Link al estudiante"""
@@ -354,11 +545,13 @@ class CourseEnrollmentAdmin(admin.ModelAdmin):
     def final_grade_display(self, obj):
         """Calificación final"""
         if obj.final_grade is not None:
-            color = '#28a745' if float(obj.final_grade) >= 70 else '#dc3545'
+            grade_value = float(obj.final_grade)
+            color = '#28a745' if grade_value >= 70 else '#dc3545'
+            grade_formatted = f'{grade_value:.2f}'
             return format_html(
-                '<strong style="color: {}; font-size: 14px;">{:.2f}</strong>',
+                '<strong style="color: {}; font-size: 14px;">{}</strong>',
                 color,
-                float(obj.final_grade)
+                grade_formatted
             )
         return format_html('<span style="color: #999;">Sin calificar</span>')
     final_grade_display.short_description = 'Calificación'
@@ -390,7 +583,7 @@ class ThesisAdmin(admin.ModelAdmin):
         'advisor_display', 'start_date', 'defense_date'
     ]
     list_filter = ['status', 'start_date']
-    search_fields = ['student__first_name', 'student__last_name', 'title', 'advisor']
+    search_fields = ['student__first_name', 'student__first_last_name', 'title', 'advisor']
     readonly_fields = ['id', 'created_at', 'updated_at', 'document_link']
     
     fieldsets = (

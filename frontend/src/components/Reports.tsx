@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getStudents, getPayments, getCareers, getCourseEnrollments, getScholarships } from '../services/api';
+import { reportsApi, getStudents, getPayments } from '../services/api';
 import { 
   FiBarChart2, FiDownload, FiFileText, FiTrendingUp, FiUsers, 
   FiDollarSign, FiBook, FiAward, FiCalendar, FiFilter 
@@ -49,100 +49,80 @@ const Reports: React.FC = () => {
 
   useEffect(() => {
     loadReportData();
-  }, [dateRange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateRange.start, dateRange.end]);
 
   const loadReportData = async () => {
     setLoading(true);
     try {
-      const [studentsRes, paymentsRes, careersRes, enrollmentsRes, scholarshipsRes] = await Promise.all([
-        getStudents(),
-        getPayments(),
-        getCareers(),
-        getCourseEnrollments(),
-        getScholarships()
-      ]);
-
-      const students = studentsRes.data.results || studentsRes.data;
-      const payments = paymentsRes.data.results || paymentsRes.data;
-      const careers = careersRes.data.results || careersRes.data;
-      const enrollments = enrollmentsRes.data.results || enrollmentsRes.data;
-      const scholarships = scholarshipsRes.data.results || scholarshipsRes.data;
-
-      // Procesar datos de estudiantes
-      const studentsByCareer: Record<string, number> = {};
-      const studentsByScholarship: Record<string, number> = {};
-      
-      students.forEach((student: any) => {
-        const careerName = student.career_name || 'Sin carrera';
-        studentsByCareer[careerName] = (studentsByCareer[careerName] || 0) + 1;
-        
-        const scholarshipType = student.scholarship_type || 'NINGUNA';
-        studentsByScholarship[scholarshipType] = (studentsByScholarship[scholarshipType] || 0) + 1;
+      // Usar el endpoint consolidado de reportes
+      const response = await reportsApi.getOverview({
+        start_date: dateRange.start,
+        end_date: dateRange.end,
       });
 
-      // Procesar datos de pagos
-      const paymentsByMonth: Record<string, number> = {};
-      let totalAmount = 0;
+      console.log('Reports API Response:', response.data);
+
+      const data = response.data;
       
-      payments.forEach((payment: any) => {
-        if (payment.status === 'APROBADO') {
-          totalAmount += parseFloat(payment.amount || 0);
-          const monthKey = `${payment.year}-${String(payment.month).padStart(2, '0')}`;
-          paymentsByMonth[monthKey] = (paymentsByMonth[monthKey] || 0) + parseFloat(payment.amount || 0);
-        }
-      });
-
-      // Procesar datos académicos
-      let approvedCount = 0;
-      let totalGrades = 0;
-      let gradeCount = 0;
+      // Validar que los datos existen
+      if (!data || !data.students || !data.payments || !data.academics || !data.scholarships) {
+        console.error('Invalid data structure from API:', data);
+        setReportData(null);
+        return;
+      }
       
-      enrollments.forEach((enrollment: any) => {
-        if (enrollment.status === 'APROBADO') {
-          approvedCount++;
-          if (enrollment.final_grade) {
-            totalGrades += parseFloat(enrollment.final_grade);
-            gradeCount++;
-          }
-        }
-      });
-
-      const averageGrade = gradeCount > 0 ? totalGrades / gradeCount : 0;
-      const totalCourses = careers.reduce((sum: number, career: any) => {
-        return sum + (career.total_courses || 0);
-      }, 0);
-      const pensumCompletion = totalCourses > 0 ? (approvedCount / (students.length * totalCourses / careers.length)) * 100 : 0;
-
-      setReportData({
+      // Mapear los datos del backend al formato esperado por el componente
+      const reportData = {
         students: {
-          total: students.length,
-          active: students.filter((s: any) => s.is_active).length,
-          byCareer: studentsByCareer,
-          byScholarship: studentsByScholarship,
+          total: data.students.total || 0,
+          active: data.students.active || 0,
+          byCareer: data.students.by_career || {},
+          byScholarship: data.students.by_scholarship || {},
         },
         payments: {
-          total: payments.length,
-          approved: payments.filter((p: any) => p.status === 'APROBADO').length,
-          pending: payments.filter((p: any) => p.status === 'PENDIENTE' || p.status === 'EN_REVISION').length,
-          rejected: payments.filter((p: any) => p.status === 'RECHAZADO').length,
-          totalAmount,
-          byMonth: paymentsByMonth,
+          total: data.payments.total || 0,
+          approved: data.payments.approved || 0,
+          pending: data.payments.pending || 0,
+          rejected: data.payments.rejected || 0,
+          totalAmount: parseFloat(data.payments.total_amount || '0'),
+          byMonth: data.payments.by_month || {},
         },
         academics: {
-          totalEnrollments: enrollments.length,
-          approvedCourses: approvedCount,
-          averageGrade,
-          pensumCompletion: Math.min(pensumCompletion, 100),
+          totalEnrollments: data.academics.total_enrollments || 0,
+          approvedCourses: data.academics.approved_courses || 0,
+          averageGrade: parseFloat(String(data.academics.average_grade || '0')),
+          pensumCompletion: Math.min(parseFloat(String(data.academics.pensum_completion || '0')), 100),
         },
         scholarships: {
-          total: scholarships.length,
-          active: scholarships.filter((s: any) => s.status === 'ACTIVA').length,
-          completa: scholarships.filter((s: any) => s.scholarship_type === 'COMPLETA' && s.status === 'ACTIVA').length,
-          media: scholarships.filter((s: any) => s.scholarship_type === 'MEDIA' && s.status === 'ACTIVA').length,
+          total: data.scholarships.total || 0,
+          active: data.scholarships.active || 0,
+          completa: data.scholarships.completa || 0,
+          media: data.scholarships.media || 0,
         },
-      });
-    } catch (error) {
+      };
+      
+      setReportData(reportData);
+    } catch (error: any) {
       console.error('Error loading report data:', error);
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+      });
+      
+      // Mostrar mensaje de error más específico
+      if (error.response?.status === 403) {
+        console.error('Permiso denegado para ver reportes');
+      } else if (error.response?.status === 404) {
+        console.error('Endpoint de reportes no encontrado');
+      } else if (error.response?.status >= 500) {
+        console.error('Error del servidor al cargar reportes');
+      } else {
+        console.error('Error desconocido al cargar reportes');
+      }
+      
+      setReportData(null);
     } finally {
       setLoading(false);
     }
@@ -172,9 +152,17 @@ const Reports: React.FC = () => {
 
   const handleExportStudents = async () => {
     try {
-      const response = await getStudents();
-      const students = response.data.results || response.data;
-      exportToCSV(students, 'estudiantes');
+      // Usar endpoint de exportación del backend
+      const response = await reportsApi.getOverview({ 
+        start_date: dateRange.start, 
+        end_date: dateRange.end 
+      });
+      const data = response.data;
+      
+      // Crear datos para CSV desde el reporte consolidado
+      const students = await getStudents();
+      const studentsList = students.data.results || students.data;
+      exportToCSV(studentsList, 'estudiantes');
     } catch (error) {
       console.error('Error exporting students:', error);
     }
@@ -182,9 +170,13 @@ const Reports: React.FC = () => {
 
   const handleExportPayments = async () => {
     try {
-      const response = await getPayments();
-      const payments = response.data.results || response.data;
-      exportToCSV(payments, 'pagos');
+      // Usar endpoint de exportación del backend
+      const payments = await getPayments({ 
+        start_date: dateRange.start, 
+        end_date: dateRange.end 
+      });
+      const paymentsList = payments.data.results || payments.data;
+      exportToCSV(paymentsList, 'pagos');
     } catch (error) {
       console.error('Error exporting payments:', error);
     }
@@ -327,6 +319,14 @@ const Reports: React.FC = () => {
         <div className="empty-state">
           <FiBarChart2 className="empty-icon" />
           <h3>No se pudieron cargar los datos</h3>
+          <p>Por favor, verifica la consola del navegador para más detalles del error.</p>
+          <button 
+            className="btn btn-primary" 
+            onClick={() => loadReportData()}
+            style={{ marginTop: '1rem' }}
+          >
+            Reintentar
+          </button>
         </div>
       </div>
     );

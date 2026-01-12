@@ -11,71 +11,146 @@
         }
         .header {
             text-align: center;
-            margin-bottom: 30px;
+            margin-bottom: 40px;
+            border-bottom: 2px solid #2563eb;
+            padding-bottom: 20px;
+        }
+        .logo-container {
+            margin-bottom: 20px;
+        }
+        .logo-container img {
+            max-width: 200px;
+            height: auto;
         }
         .contract-title {
-            font-size: 24px;
+            font-size: 28px;
             font-weight: bold;
-            margin-bottom: 20px;
+            margin-bottom: 10px;
+            color: #1e293b;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .institution-name {
+            font-size: 18px;
+            font-weight: 600;
+            color: #2563eb;
+            margin-top: 10px;
         }
         .section {
             margin-bottom: 20px;
+            text-align: justify;
         }
         .signature-section {
-            margin-top: 50px;
+            margin-top: 60px;
             display: flex;
             justify-content: space-between;
         }
         .signature-box {
             width: 45%;
             text-align: center;
-            border-top: 1px solid #000;
-            padding-top: 10px;
+            border-top: 2px solid #000;
+            padding-top: 15px;
+        }
+        h3 {
+            color: #1e293b;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 5px;
+            margin-top: 30px;
         }
     </style>
 </head>
 <body>
     <div class="header">
+        {% if logo_base64 %}
+        <div class="logo-container">
+            <img src="{{ logo_base64 }}" alt="Logo Centro Universitario Santa Cecilia" />
+        </div>
+        {% endif %}
         <div class="contract-title">CONTRATO DE INSCRIPCIÓN</div>
-        <p>Centro Universitario de San Cristóbal</p>
+        <p class="institution-name">{{ institution_name|default:"Centro Universitario Santa Cecilia" }}</p>
     </div>
     
     <div class="section">
-        <p>En la ciudad de San Cristóbal, a los {{ date }}, se celebra el presente contrato de inscripción entre:</p>
+        <p>En la ciudad de Chalco, Estado de México, a los {{ date }}, se celebra el presente contrato de inscripción entre:</p>
     </div>
     
     <div class="section">
-        <p><strong>EL ESTUDIANTE:</strong> {{ student.first_name }} {{ student.last_name }}, 
-        con carnet {{ student.carnet }}, identificado con CURP {{ student.curp }}, 
+        <p><strong>EL ESTUDIANTE:</strong> {{ full_name|default:student_name|default:student.get_full_name|default:student.first_name }}, 
+        con carnet {{ student.carnet|default:"N/A" }}, identificado con CURP {{ student.curp|default:"N/A" }}, 
+        {% if student.date_of_birth %}nacido el {{ student.date_of_birth|date:"d \d\e F \d\e Y" }},{% endif %} 
+        con domicilio en {{ student.address|default:"No especificado" }}, 
         quien en lo sucesivo se denominará "EL ESTUDIANTE".</p>
     </div>
     
     <div class="section">
-        <p><strong>LA INSTITUCIÓN:</strong> Centro Universitario de San Cristóbal (CUSC), 
+        <p><strong>LA INSTITUCIÓN:</strong> {{ institution_name|default:"Centro Universitario Santa Cecilia" }} ({{ institution_acronym|default:"CUSC" }}), 
+        {% if institution_address %}con domicilio en {{ institution_address }}, {% endif %}
         quien en lo sucesivo se denominará "LA INSTITUCIÓN".</p>
+    </div>
+    
+    <div class="section">
+        <h3>OBJETO DEL CONTRATO:</h3>
+        <p>EL ESTUDIANTE solicita su inscripción y LA INSTITUCIÓN acepta inscribirlo en la carrera de 
+        <strong>{{ career }}</strong> para el ciclo escolar {{ enrollment.school_year|default:"2024" }}.</p>
     </div>
     
     <div class="section">
         <h3>CLÁUSULAS:</h3>
         <p><strong>PRIMERA:</strong> EL ESTUDIANTE se compromete a cumplir con todas las obligaciones académicas, 
-        administrativas y de conducta establecidas por LA INSTITUCIÓN.</p>
+        administrativas y de conducta establecidas por LA INSTITUCIÓN en su reglamento interno.</p>
         
         <p><strong>SEGUNDA:</strong> LA INSTITUCIÓN se compromete a proporcionar los servicios educativos 
-        correspondientes a la carrera de {{ student.career.name }}.</p>
+        correspondientes a la carrera de {{ career }}, de conformidad con el plan de estudios vigente 
+        {% if enrollment.rvoe_agreement_number %}y el reconocimiento de validez oficial de estudios (RVOE) número {{ enrollment.rvoe_agreement_number }}.{% endif %}</p>
         
         <p><strong>TERCERA:</strong> EL ESTUDIANTE se compromete a realizar los pagos correspondientes 
-        según el calendario establecido por LA INSTITUCIÓN.</p>
+        según el calendario establecido por LA INSTITUCIÓN, así como a cumplir con todos los requisitos 
+        académicos para mantener su inscripción.</p>
+        
+        <p><strong>CUARTA:</strong> EL ESTUDIANTE declara que la información proporcionada es verídica 
+        y se compromete a notificar cualquier cambio en sus datos personales o académicos.</p>
+        
+        <p><strong>QUINTA:</strong> LA INSTITUCIÓN se compromete a mantener la confidencialidad de los 
+        datos personales del ESTUDIANTE conforme a la legislación aplicable.</p>
+    </div>
+    
+    <div class="section">
+        <p><strong>ACEPTACIÓN:</strong> Ambas partes aceptan las condiciones establecidas en este contrato 
+        y se comprometen a cumplirlas de buena fe.</p>
     </div>
     
     <div class="signature-section">
         <div class="signature-box">
-            <p>EL ESTUDIANTE</p>
-            <p>{{ student.first_name }} {{ student.last_name }}</p>
+            <p><strong>EL ESTUDIANTE</strong></p>
+            <p style="margin-top: 60px;">{{ full_name|default:student_name|default:student.get_full_name|default:student.first_name }}</p>
+            <p style="margin-top: 5px;">Carnet: {{ student.carnet|default:"N/A" }}</p>
+            <p style="margin-top: 20px;">_________________________</p>
+            <p>Firma</p>
         </div>
         <div class="signature-box">
-            <p>LA INSTITUCIÓN</p>
-            <p>Centro Universitario de San Cristóbal</p>
+            <p><strong>LA INSTITUCIÓN</strong></p>
+            <p style="margin-top: 40px;">{{ institution_name|default:"Centro Universitario Santa Cecilia" }}</p>
+            {% if institution_address %}
+            <p style="margin-top: 5px; font-size: 11px;">{{ institution_address }}</p>
+            {% endif %}
+            {% if enrollment.cct %}
+            <p style="margin-top: 5px;">CCT: {{ enrollment.cct }}</p>
+            {% endif %}
+            <p style="margin-top: 15px;">_________________________</p>
+            <p>Firma y sello</p>
         </div>
+    </div>
+    
+    <div class="section" style="margin-top: 30px; font-size: 10px; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 15px;">
+        <p>Este documento debe ser firmado por ambas partes y escaneado para completar el proceso de inscripción.</p>
+        {% if institution_address %}
+        <p style="margin-top: 5px;"><strong>{{ institution_name|default:"Centro Universitario Santa Cecilia" }}</strong><br/>
+        {{ institution_address }}</p>
+        {% if institution_maps_url %}
+        <p style="margin-top: 5px;"><a href="{{ institution_maps_url }}" style="color: #2563eb; text-decoration: none;">Ver ubicación en Google Maps</a></p>
+        {% endif %}
+        {% endif %}
+        <p style="margin-top: 10px;">Fecha de emisión: {{ date }}</p>
     </div>
 </body>
 </html>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { getStudentProgress, getCourseEnrollments, updateCourseGrade, getStudent } from '../services/api';
-import { FiBook, FiTrendingUp, FiCheckCircle, FiXCircle, FiEdit2, FiSave, FiLoader } from '../utils/icons';
+import { useSearchParams, Link } from 'react-router-dom';
+import { getStudentProgress, getCourseEnrollments, updateCourseGrade, getStudent, getStudents } from '../services/api';
+import { FiBook, FiTrendingUp, FiCheckCircle, FiXCircle, FiEdit2, FiSave, FiLoader, FiSearch, FiArrowLeft, FiUpload } from '../utils/icons';
 import { useToast } from '../hooks/useToast';
 import './shared.css';
 import './AcademicProgress.css';
@@ -25,8 +25,19 @@ interface Enrollment {
   cuatrimestre?: string;
 }
 
+interface StudentOption {
+  id: string;
+  carnet: string;
+  first_name: string;
+  last_name?: string;
+  first_last_name?: string;
+  second_last_name?: string;
+  full_name?: string;
+  career_name: string;
+}
+
 const AcademicProgress: React.FC = () => {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const studentId = searchParams.get('studentId');
   const { success, error } = useToast();
 
@@ -36,14 +47,48 @@ const AcademicProgress: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [students, setStudents] = useState<StudentOption[]>([]);
+  const [loadingStudents, setLoadingStudents] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     if (studentId) {
+      setLoading(true);
       loadStudentData();
       loadProgress(studentId);
       loadEnrollments(studentId);
+    } else {
+      setLoading(false);
+      loadStudentsList();
     }
   }, [studentId]);
+
+  const loadStudentsList = async () => {
+    setLoadingStudents(true);
+    try {
+      const response = await getStudents({ page_size: 100 });
+      const data = response.data.results || response.data;
+      setStudents(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Error loading students:', err);
+      error('Error al cargar la lista de estudiantes');
+    } finally {
+      setLoadingStudents(false);
+    }
+  };
+
+  const handleStudentSelect = (selectedStudentId: string) => {
+    if (selectedStudentId) {
+      setSearchParams({ studentId: selectedStudentId });
+    }
+  };
+
+  const handleChangeStudent = () => {
+    setSearchParams({});
+    setStudent(null);
+    setProgress(null);
+    setEnrollments([]);
+  };
 
   const loadStudentData = async () => {
     if (!studentId) return;
@@ -123,13 +168,107 @@ const AcademicProgress: React.FC = () => {
     return 'fail';
   };
 
+  const getStudentDisplayName = (student: StudentOption): string => {
+    if (student.full_name) return student.full_name;
+    const lastName = student.first_last_name || student.last_name || '';
+    const secondLastName = student.second_last_name || '';
+    return `${student.first_name} ${lastName} ${secondLastName}`.trim();
+  };
+
+  const filteredStudents = students.filter(s => {
+    if (!searchTerm) return true;
+    const search = searchTerm.toLowerCase();
+    const fullName = getStudentDisplayName(s).toLowerCase();
+    return (
+      s.carnet.toLowerCase().includes(search) ||
+      fullName.includes(search) ||
+      s.career_name.toLowerCase().includes(search)
+    );
+  });
+
   if (!studentId) {
     return (
       <div className="page-container">
-        <div className="empty-state">
-          <FiBook className="empty-icon" />
-          <h3>No se especificó un estudiante</h3>
-          <p>Selecciona un estudiante para ver su progreso académico</p>
+        <div className="page-header">
+          <div className="header-title">
+            <FiBook className="header-icon" />
+            <div>
+              <h1>Progreso Académico</h1>
+              <p className="header-subtitle">Selecciona un estudiante para ver su progreso académico</p>
+            </div>
+          </div>
+          <div className="header-actions">
+            <Link 
+              to="/grades/upload" 
+              className="btn btn-primary"
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            >
+              <FiUpload /> Subir Notas Masivamente
+            </Link>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="form-group" style={{ marginBottom: '1rem' }}>
+            <label htmlFor="student-search">Buscar Estudiante</label>
+            <div style={{ position: 'relative' }}>
+              <FiSearch 
+                style={{ 
+                  position: 'absolute', 
+                  left: '12px', 
+                  top: '50%', 
+                  transform: 'translateY(-50%)',
+                  color: 'var(--text-secondary)'
+                }} 
+              />
+              <input
+                id="student-search"
+                type="text"
+                placeholder="Buscar por carnet, nombre o carrera..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="form-input"
+                style={{ paddingLeft: '40px' }}
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="student-select">Seleccionar Estudiante *</label>
+            {loadingStudents ? (
+              <div className="loading-spinner" style={{ padding: '2rem' }}>
+                <div className="spinner"></div>
+                <p>Cargando estudiantes...</p>
+              </div>
+            ) : (
+              <>
+                <select
+                  id="student-select"
+                  value=""
+                  onChange={(e) => handleStudentSelect(e.target.value)}
+                  className="form-input"
+                  style={{ marginBottom: '1rem' }}
+                >
+                  <option value="">Seleccione un estudiante</option>
+                  {filteredStudents.map((student) => (
+                    <option key={student.id} value={student.id}>
+                      {student.carnet} - {getStudentDisplayName(student)} ({student.career_name})
+                    </option>
+                  ))}
+                </select>
+                {searchTerm && filteredStudents.length === 0 && (
+                  <p style={{ color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+                    No se encontraron estudiantes que coincidan con la búsqueda.
+                  </p>
+                )}
+                {!searchTerm && filteredStudents.length === 0 && (
+                  <p style={{ color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+                    No hay estudiantes disponibles.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -150,13 +289,24 @@ const AcademicProgress: React.FC = () => {
     <div className="page-container">
       {student && (
         <div className="page-header">
-          <div className="header-title">
-            <FiBook className="header-icon" />
-            <div>
-              <h1>Progreso Académico</h1>
-              <p className="header-subtitle">
-                {student.full_name || `${student.first_name} ${student.last_name}`} - {student.carnet}
-              </p>
+          <div className="header-content">
+            <div className="header-title">
+              <FiBook className="header-icon" />
+              <div>
+                <h1>Progreso Académico</h1>
+                <p className="header-subtitle">
+                  {student.full_name || `${student.first_name} ${student.last_name}`} - {student.carnet}
+                </p>
+              </div>
+            </div>
+            <div className="header-actions">
+              <button 
+                onClick={handleChangeStudent}
+                className="btn btn-secondary"
+                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+              >
+                <FiArrowLeft /> Cambiar Estudiante
+              </button>
             </div>
           </div>
         </div>

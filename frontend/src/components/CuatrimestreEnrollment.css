@@ -1,0 +1,148 @@
+.enrollments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.enrollment-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  transition: all 0.2s ease;
+}
+
+.enrollment-card:hover {
+  border-color: var(--primary-color);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.enrollment-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.enrollment-info h3 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.25rem;
+  color: var(--text-primary);
+}
+
+.enrollment-year {
+  margin: 0.25rem 0;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.enrollment-career {
+  margin: 0.25rem 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.enrollment-status {
+  flex-shrink: 0;
+}
+
+.enrollment-details {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.enrollment-meta {
+  display: flex;
+  gap: 2rem;
+  flex-wrap: wrap;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.enrollment-date,
+.enrollment-courses-count {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.enrollment-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.375rem 0.75rem;
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.status-pendiente {
+  background-color: #fff3cd;
+  color: #856404;
+}
+
+.status-inscrito {
+  background-color: #d1ecf1;
+  color: #0c5460;
+}
+
+.status-en-curso {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.status-finalizado {
+  background-color: #d1ecf1;
+  color: #0c5460;
+}
+
+.status-cancelado {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+.btn-sm {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+}
+
+.btn-danger {
+  background-color: #dc3545;
+  color: white;
+}
+
+.btn-danger:hover {
+  background-color: #c82333;
+}
+
+@media (max-width: 768px) {
+  .enrollment-header {
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .enrollment-actions {
+    flex-direction: column;
+  }
+
+  .enrollment-actions .btn {
+    width: 100%;
+  }
+
+  .enrollment-meta {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+}
+
+
+

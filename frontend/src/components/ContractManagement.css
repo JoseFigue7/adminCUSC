@@ -1,0 +1,261 @@
+.contract-info {
+  margin-bottom: 2rem;
+}
+
+.contract-info h3 {
+  margin-bottom: 1.5rem;
+  color: var(--primary-color);
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.info-item label {
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.info-item span {
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.4rem 0.8rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status-badge.status-pendiente {
+  background-color: #fff3cd;
+  color: #856404;
+}
+
+.status-badge.status-en_revision {
+  background-color: #d1ecf1;
+  color: #0c5460;
+}
+
+.status-badge.status-aprobada {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.status-badge.status-rechazada {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+.status-approved {
+  color: #28a745;
+  font-weight: 600;
+}
+
+.status-pending {
+  color: #ffc107;
+  font-weight: 600;
+}
+
+.contract-step {
+  margin-bottom: 1.5rem;
+  border-left: 4px solid var(--primary-color);
+}
+
+.contract-step.success-step {
+  border-left-color: #28a745;
+  background-color: #f0fff4;
+}
+
+.contract-step.warning-step {
+  border-left-color: #ffc107;
+  background-color: #fffbf0;
+}
+
+.step-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.step-number {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: var(--primary-color);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 1.2rem;
+  flex-shrink: 0;
+}
+
+.step-number.success {
+  background-color: #28a745;
+}
+
+.step-number.warning {
+  background-color: #ffc107;
+  color: #000;
+}
+
+.step-header h3 {
+  margin: 0 0 0.5rem 0;
+  color: var(--text-primary);
+}
+
+.step-header p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.step-content {
+  margin-left: 56px;
+}
+
+.contract-generated,
+.contract-not-generated,
+.contract-uploaded {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.contract-generated p,
+.contract-uploaded p {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.upload-date {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.icon-success {
+  color: #28a745;
+  font-size: 2rem;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.contract-upload-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.file-upload-area {
+  position: relative;
+}
+
+.file-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.file-label {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 2px dashed var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background-color: var(--background-secondary);
+  color: var(--text-primary);
+}
+
+.file-label:hover:not(.disabled) {
+  border-color: var(--primary-color);
+  background-color: var(--primary-light);
+}
+
+.file-label.has-file {
+  border-color: #28a745;
+  background-color: #f0fff4;
+}
+
+.file-label.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.file-label svg {
+  font-size: 1.5rem;
+  color: var(--primary-color);
+}
+
+.file-label.has-file svg {
+  color: #28a745;
+}
+
+.info-message {
+  padding: 0.75rem;
+  background-color: #fff3cd;
+  border-left: 4px solid #ffc107;
+  border-radius: 4px;
+  color: #856404;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.error-message {
+  color: #dc3545;
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+@media (max-width: 768px) {
+  .info-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .step-content {
+    margin-left: 0;
+  }
+
+  .step-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .action-buttons {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .action-buttons .btn {
+    width: 100%;
+  }
+}
+
+
+
+
+
+

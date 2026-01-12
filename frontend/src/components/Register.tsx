@@ -75,7 +75,7 @@ const Register: React.FC = () => {
     <div className="auth-container">
       <div className="auth-card">
         <div className="auth-header">
-          <FiUserPlus className="auth-icon" />
+          <img src="/SC Logo.png" alt="AdminCUSC Logo" className="auth-logo" />
           <h1>Registro</h1>
           <p>Crea una cuenta para acceder al sistema</p>
         </div>

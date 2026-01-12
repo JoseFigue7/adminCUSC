@@ -54,3 +54,7 @@ export const FiUserPlus: React.FC<IconProps> = createIcon('FiUserPlus');
 export const FiMail: React.FC<IconProps> = createIcon('FiMail');
 export const FiPhone: React.FC<IconProps> = createIcon('FiPhone');
 export const FiLock: React.FC<IconProps> = createIcon('FiLock');
+export const FiPrinter: React.FC<IconProps> = createIcon('FiPrinter');
+export const FiClock: React.FC<IconProps> = createIcon('FiClock');
+export const FiAlertTriangle: React.FC<IconProps> = createIcon('FiAlertTriangle');
+export const FiRefreshCw: React.FC<IconProps> = createIcon('FiRefreshCw');
