@@ -3,7 +3,7 @@ from django.utils.html import format_html
 from django.urls import reverse
 from django.db.models import Sum, Count
 from django.utils.safestring import mark_safe
-from .models import Payment, Scholarship, PaymentConfiguration, PaymentType
+from .models import Payment, Scholarship, PaymentConfiguration, PaymentType, PaymentStatusHistory, StripeWebhookEvent
 
 
 class ScholarshipInline(admin.StackedInline):
@@ -27,11 +27,12 @@ class PaymentAdmin(admin.ModelAdmin):
     search_fields = [
         'student__first_name', 'student__last_name', 
         'student__carnet', 'receipt_number', 'transaction_id',
-        'payment_type__name', 'payment_type__code'
+        'stripe_payment_intent_id', 'payment_type__name', 'payment_type__code'
     ]
     readonly_fields = [
         'id', 'payment_date', 'created_at', 'updated_at',
-        'student_scholarship_info', 'penalty_calculation_info'
+        'student_scholarship_info', 'penalty_calculation_info',
+        'created_by', 'approved_by', 'approved_at'
     ]
     date_hierarchy = 'payment_date'
     
@@ -39,6 +40,7 @@ class PaymentAdmin(admin.ModelAdmin):
         ('Información del Pago', {
             'fields': (
                 'student',
+                'career',
                 'payment_type',
                 ('month', 'year', 'semester'),
                 ('amount', 'base_amount', 'penalty_amount'),
@@ -53,6 +55,7 @@ class PaymentAdmin(admin.ModelAdmin):
                 'receipt_number',
                 'card_last_four',
                 'transaction_id',
+                'stripe_payment_intent_id',
             ),
             'classes': ('collapse',),
         }),
@@ -67,16 +70,33 @@ class PaymentAdmin(admin.ModelAdmin):
         ('Notas', {
             'fields': ('notes',),
         }),
+        ('Trazabilidad', {
+            'fields': (
+                ('created_by', 'created_at'),
+                ('approved_by', 'approved_at'),
+            ),
+            'classes': ('collapse',),
+        }),
         ('Información del Sistema', {
             'fields': (
                 'id',
-                ('created_at', 'updated_at'),
+                'updated_at',
             ),
             'classes': ('collapse',),
         }),
     )
     
     actions = ['approve_payments', 'reject_payments', 'mark_as_review']
+    
+    def save_model(self, request, obj, form, change):
+        """Guardar modelo y asignar usuario creador si es nuevo"""
+        # Si es un nuevo pago, asignar usuario creador
+        # El modelo Payment.save() ya maneja la lógica de aprobación automática
+        if not change:  # Es un nuevo objeto
+            obj.created_by = request.user
+            # No establecer status aquí, el modelo lo maneja automáticamente
+        
+        super().save_model(request, obj, form, change)
     
     def student_link(self, obj):
         """Link al estudiante"""
@@ -272,7 +292,14 @@ class PaymentAdmin(admin.ModelAdmin):
     # Actions
     def approve_payments(self, request, queryset):
         """Aprobar pagos"""
-        updated = queryset.update(status='APROBADO')
+        from django.utils import timezone
+        updated = 0
+        for payment in queryset:
+            payment.status = 'APROBADO'
+            payment.approved_by = request.user
+            payment.approved_at = timezone.now()
+            payment.save()
+            updated += 1
         self.message_user(request, f'{updated} pago(s) aprobado(s).')
     approve_payments.short_description = "Aprobar pagos seleccionados"
     
@@ -287,6 +314,59 @@ class PaymentAdmin(admin.ModelAdmin):
         updated = queryset.update(status='EN_REVISION')
         self.message_user(request, f'{updated} pago(s) marcado(s) como en revisión.')
     mark_as_review.short_description = "Marcar como en revisión"
+
+
+@admin.register(PaymentStatusHistory)
+class PaymentStatusHistoryAdmin(admin.ModelAdmin):
+    """Admin para historial de cambios de estado de pagos"""
+    list_display = [
+        'payment_link', 'previous_status_display', 'new_status_display',
+        'changed_by_display', 'changed_at'
+    ]
+    list_filter = ['changed_at', 'changed_by', 'new_status']
+    search_fields = ['previous_status', 'new_status', 'comment', 'payment__student__first_name']
+    readonly_fields = ['id', 'changed_at']
+    ordering = ['-changed_at']
+    date_hierarchy = 'changed_at'
+    
+    def payment_link(self, obj):
+        """Link al pago"""
+        url = reverse('admin:payments_payment_change', args=[obj.payment.pk])
+        return format_html(
+            '<a href="{}">{}</a>',
+            url,
+            str(obj.payment)
+        )
+    payment_link.short_description = 'Pago'
+    
+    def previous_status_display(self, obj):
+        """Display del estado anterior"""
+        if obj.previous_status:
+            return format_html(
+                '<span style="background-color: #ffc107; color: white; padding: 3px 8px; border-radius: 3px;">{}</span>',
+                obj.previous_status
+            )
+        return format_html('<span style="color: #999;">-</span>')
+    previous_status_display.short_description = 'Estado Anterior'
+    
+    def new_status_display(self, obj):
+        """Display del estado nuevo"""
+        return format_html(
+            '<span style="background-color: #28a745; color: white; padding: 3px 8px; border-radius: 3px;">{}</span>',
+            obj.new_status
+        )
+    new_status_display.short_description = 'Estado Nuevo'
+    
+    def changed_by_display(self, obj):
+        """Display del usuario que hizo el cambio"""
+        if obj.changed_by:
+            return format_html(
+                '<strong>{}</strong> ({})',
+                obj.changed_by.get_full_name() or obj.changed_by.username,
+                obj.changed_by.username
+            )
+        return format_html('<span style="color: #999;">Sistema</span>')
+    changed_by_display.short_description = 'Cambiado Por'
 
 
 @admin.register(Scholarship)
@@ -578,3 +658,108 @@ class PaymentTypeAdmin(admin.ModelAdmin):
         )
     status_badge.short_description = 'Estado'
     status_badge.admin_order_field = 'is_active'
+
+
+@admin.register(StripeWebhookEvent)
+class StripeWebhookEventAdmin(admin.ModelAdmin):
+    """Admin para eventos de webhook de Stripe"""
+    list_display = [
+        'stripe_event_id_short', 'event_type_badge', 'payment_intent_id_short',
+        'processed_badge', 'processed_at', 'created_at'
+    ]
+    list_filter = ['event_type', 'processed', 'created_at']
+    search_fields = ['stripe_event_id', 'payment_intent_id', 'event_type', 'error_message']
+    readonly_fields = ['id', 'stripe_event_id', 'created_at', 'updated_at', 'raw_data_display']
+    ordering = ['-created_at']
+    date_hierarchy = 'created_at'
+    
+    fieldsets = (
+        ('Información del Evento', {
+            'fields': (
+                'stripe_event_id',
+                'event_type',
+                'payment_intent_id',
+                'processed',
+                'processed_at',
+            ),
+        }),
+        ('Errores', {
+            'fields': ('error_message',),
+            'classes': ('collapse',),
+        }),
+        ('Datos del Evento', {
+            'fields': ('raw_data_display',),
+            'classes': ('collapse',),
+        }),
+        ('Información del Sistema', {
+            'fields': (
+                'id',
+                ('created_at', 'updated_at'),
+            ),
+            'classes': ('collapse',),
+        }),
+    )
+    
+    def stripe_event_id_short(self, obj):
+        """ID del evento acortado"""
+        if len(obj.stripe_event_id) > 30:
+            return format_html(
+                '<span title="{}">{}</span>',
+                obj.stripe_event_id,
+                obj.stripe_event_id[:30] + '...'
+            )
+        return obj.stripe_event_id
+    stripe_event_id_short.short_description = 'Event ID'
+    stripe_event_id_short.admin_order_field = 'stripe_event_id'
+    
+    def event_type_badge(self, obj):
+        """Badge para tipo de evento"""
+        colors = {
+            'payment_intent.succeeded': '#28a745',
+            'payment_intent.payment_failed': '#dc3545',
+        }
+        color = colors.get(obj.event_type, '#6c757d')
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 4px 10px; border-radius: 4px; font-weight: bold;">{}</span>',
+            color,
+            obj.event_type
+        )
+    event_type_badge.short_description = 'Tipo de Evento'
+    event_type_badge.admin_order_field = 'event_type'
+    
+    def payment_intent_id_short(self, obj):
+        """ID del payment intent acortado"""
+        if not obj.payment_intent_id:
+            return format_html('<span style="color: #999;">N/A</span>')
+        if len(obj.payment_intent_id) > 30:
+            return format_html(
+                '<span title="{}">{}</span>',
+                obj.payment_intent_id,
+                obj.payment_intent_id[:30] + '...'
+            )
+        return obj.payment_intent_id
+    payment_intent_id_short.short_description = 'Payment Intent ID'
+    payment_intent_id_short.admin_order_field = 'payment_intent_id'
+    
+    def processed_badge(self, obj):
+        """Badge para estado de procesamiento"""
+        if obj.processed:
+            return format_html(
+                '<span style="background-color: #28a745; color: white; padding: 4px 10px; border-radius: 4px; font-weight: bold;">✓ Procesado</span>'
+            )
+        return format_html(
+            '<span style="background-color: #ffc107; color: white; padding: 4px 10px; border-radius: 4px; font-weight: bold;">⏳ Pendiente</span>'
+        )
+    processed_badge.short_description = 'Estado'
+    processed_badge.admin_order_field = 'processed'
+    
+    def raw_data_display(self, obj):
+        """Mostrar datos del evento formateados"""
+        if obj.raw_data:
+            import json
+            return format_html(
+                '<pre style="background-color: #f5f5f5; padding: 10px; border-radius: 5px; overflow-x: auto;">{}</pre>',
+                json.dumps(obj.raw_data, indent=2, ensure_ascii=False)
+            )
+        return format_html('<span style="color: #999;">Sin datos</span>')
+    raw_data_display.short_description = 'Datos del Evento'

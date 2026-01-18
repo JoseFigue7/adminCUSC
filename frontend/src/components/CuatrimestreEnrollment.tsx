@@ -6,7 +6,7 @@ import {
 } from '../services/api';
 import { 
   FiCalendar, FiPlus, FiArrowLeft, FiCheckCircle, FiXCircle,
-  FiX, FiEdit
+  FiX, FiEdit, FiDollarSign, FiDownload, FiClock, FiAlertCircle
 } from '../utils/icons';
 import { useToast } from '../hooks/useToast';
 import './shared.css';
@@ -65,8 +65,14 @@ const CuatrimestreEnrollment: React.FC = () => {
   const [formData, setFormData] = useState({
     cuatrimestre: '',
     academic_year: new Date().getFullYear(),
-    status: 'INSCRITO',
     notes: ''
+  });
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [selectedEnrollment, setSelectedEnrollment] = useState<CuatrimestreEnrollment | null>(null);
+  const [paymentData, setPaymentData] = useState({
+    payment_method: 'EFECTIVO',
+    payment_reference: '',
+    transfer_receipt: null as File | null
   });
 
   useEffect(() => {
@@ -113,29 +119,34 @@ const CuatrimestreEnrollment: React.FC = () => {
     if (!studentId) return;
 
     try {
+      // Preparar datos: no enviar status al crear (usará el default 'PENDIENTE_PAGO' del backend)
+      // Al editar, tampoco permitimos cambiar el status desde el formulario
+      const enrollmentData = {
+        cuatrimestre: formData.cuatrimestre,
+        academic_year: formData.academic_year,
+        notes: formData.notes,
+        student: studentId
+      };
+
       if (editingId) {
-        await academicsApi.updateCuatrimestreEnrollment(editingId, {
-          ...formData,
-          student: studentId
-        });
+        await academicsApi.updateCuatrimestreEnrollment(editingId, enrollmentData);
         success('Inscripción actualizada exitosamente');
-      } else {
-        await academicsApi.createCuatrimestreEnrollment({
-          ...formData,
-          student: studentId
+        setShowForm(false);
+        setEditingId(null);
+        setFormData({
+          cuatrimestre: '',
+          academic_year: new Date().getFullYear(),
+          notes: ''
         });
-        success('Inscripción creada exitosamente');
+        await loadData();
+      } else {
+        // Crear inscripción y redirigir inmediatamente a selección de cursos
+        const response = await academicsApi.createCuatrimestreEnrollment(enrollmentData);
+        const newEnrollmentId = response.data.id;
+        success('Inscripción creada. Ahora seleccione los cursos.');
+        // Redirigir a la selección de cursos
+        navigate(`/courses/enroll?cuatrimestreEnrollmentId=${newEnrollmentId}`);
       }
-      
-      setShowForm(false);
-      setEditingId(null);
-      setFormData({
-        cuatrimestre: '',
-        academic_year: new Date().getFullYear(),
-        status: 'INSCRITO',
-        notes: ''
-      });
-      await loadData();
     } catch (err: any) {
       console.error('Error saving enrollment:', err);
       error(err.response?.data?.detail || 'Error al guardar la inscripción');
@@ -147,7 +158,6 @@ const CuatrimestreEnrollment: React.FC = () => {
     setFormData({
       cuatrimestre: enrollment.cuatrimestre,
       academic_year: enrollment.academic_year,
-      status: enrollment.status,
       notes: ''
     });
     setShowForm(true);
@@ -170,6 +180,62 @@ const CuatrimestreEnrollment: React.FC = () => {
 
   const handleViewCourses = (enrollmentId: string) => {
     navigate(`/courses/enroll?cuatrimestreEnrollmentId=${enrollmentId}`);
+  };
+
+  const handleProcessPayment = (enrollment: CuatrimestreEnrollment) => {
+    setSelectedEnrollment(enrollment);
+    setPaymentData({
+      payment_method: 'EFECTIVO',
+      payment_reference: '',
+      transfer_receipt: null
+    });
+    setShowPaymentModal(true);
+  };
+
+  const handleSubmitPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedEnrollment) return;
+
+    try {
+      await academicsApi.processEnrollmentPayment(selectedEnrollment.id, paymentData);
+      success('Pago de inscripción procesado. Debe ser aprobado para continuar.');
+      setShowPaymentModal(false);
+      setSelectedEnrollment(null);
+      await loadData();
+    } catch (err: any) {
+      console.error('Error processing payment:', err);
+      error(err.response?.data?.error || 'Error al procesar el pago');
+    }
+  };
+
+  const handleApprovePayment = async (enrollmentId: string) => {
+    if (!window.confirm('¿Está seguro de aprobar este pago? Esto permitirá al estudiante asignar cursos.')) {
+      return;
+    }
+
+    try {
+      await academicsApi.approveEnrollmentPayment(enrollmentId);
+      success('Pago aprobado. El estudiante ahora puede asignar cursos.');
+      await loadData();
+    } catch (err: any) {
+      console.error('Error approving payment:', err);
+      error(err.response?.data?.error || 'Error al aprobar el pago');
+    }
+  };
+
+  const handleRejectPayment = async (enrollmentId: string) => {
+    if (!window.confirm('¿Está seguro de rechazar este pago? El estudiante deberá crear un nuevo pago.')) {
+      return;
+    }
+
+    try {
+      await academicsApi.rejectEnrollmentPayment(enrollmentId);
+      success('Pago rechazado. El estudiante puede crear un nuevo pago.');
+      await loadData();
+    } catch (err: any) {
+      console.error('Error rejecting payment:', err);
+      error(err.response?.data?.error || 'Error al rechazar el pago');
+    }
   };
 
   if (loading) {
@@ -225,7 +291,6 @@ const CuatrimestreEnrollment: React.FC = () => {
                 setFormData({
                   cuatrimestre: '',
                   academic_year: new Date().getFullYear(),
-                  status: 'INSCRITO',
                   notes: ''
                 });
               }}
@@ -271,22 +336,6 @@ const CuatrimestreEnrollment: React.FC = () => {
                 max="9999"
                 required
               />
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="status">Estado *</label>
-              <select
-                id="status"
-                value={formData.status}
-                onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                required
-              >
-                <option value="PENDIENTE">Pendiente</option>
-                <option value="INSCRITO">Inscrito</option>
-                <option value="EN_CURSO">En Curso</option>
-                <option value="FINALIZADO">Finalizado</option>
-                <option value="CANCELADO">Cancelado</option>
-              </select>
             </div>
 
             <div className="form-group">
@@ -354,24 +403,76 @@ const CuatrimestreEnrollment: React.FC = () => {
                   </div>
                   
                   <div className="enrollment-actions">
-                    <button
-                      onClick={() => handleViewCourses(enrollment.id)}
-                      className="btn btn-primary btn-sm"
-                    >
-                      <FiCheckCircle /> Ver/Asignar Cursos
-                    </button>
-                    <button
-                      onClick={() => handleEdit(enrollment)}
-                      className="btn btn-secondary btn-sm"
-                    >
-                      <FiEdit /> Editar
-                    </button>
-                    <button
-                      onClick={() => handleDelete(enrollment.id)}
-                      className="btn btn-danger btn-sm"
-                    >
-                      <FiX /> Eliminar
-                    </button>
+                    {enrollment.status === 'PENDIENTE_PAGO' && (
+                      <>
+                        <button
+                          onClick={() => handleProcessPayment(enrollment)}
+                          className="btn btn-primary btn-sm"
+                        >
+                          <FiDollarSign /> Procesar Pago
+                        </button>
+                        <button
+                          onClick={() => handleEdit(enrollment)}
+                          className="btn btn-secondary btn-sm"
+                        >
+                          <FiEdit /> Editar
+                        </button>
+                      </>
+                    )}
+                    {enrollment.status === 'PENDIENTE_CONFIRMACION' && (
+                      <>
+                        <button
+                          onClick={() => handleViewCourses(enrollment.id)}
+                          className="btn btn-primary btn-sm"
+                        >
+                          <FiCheckCircle /> Asignar Cursos
+                        </button>
+                        <button
+                          onClick={() => handleApprovePayment(enrollment.id)}
+                          className="btn btn-success btn-sm"
+                        >
+                          <FiCheckCircle /> Aprobar Pago
+                        </button>
+                        <button
+                          onClick={() => handleRejectPayment(enrollment.id)}
+                          className="btn btn-warning btn-sm"
+                        >
+                          <FiXCircle /> Rechazar Pago
+                        </button>
+                      </>
+                    )}
+                    {enrollment.status === 'EN_CURSO' && (
+                      <>
+                        <button
+                          onClick={() => handleViewCourses(enrollment.id)}
+                          className="btn btn-primary btn-sm"
+                        >
+                          <FiCheckCircle /> Ver Cursos
+                        </button>
+                        <button
+                          onClick={() => handleEdit(enrollment)}
+                          className="btn btn-secondary btn-sm"
+                        >
+                          <FiEdit /> Editar
+                        </button>
+                      </>
+                    )}
+                    {(enrollment.status === 'FINALIZADO' || enrollment.status === 'CANCELADO') && (
+                      <button
+                        onClick={() => handleViewCourses(enrollment.id)}
+                        className="btn btn-secondary btn-sm"
+                      >
+                        <FiCheckCircle /> Ver Cursos
+                      </button>
+                    )}
+                    {enrollment.status !== 'EN_CURSO' && enrollment.status !== 'FINALIZADO' && (
+                      <button
+                        onClick={() => handleDelete(enrollment.id)}
+                        className="btn btn-danger btn-sm"
+                      >
+                        <FiX /> Eliminar
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -379,6 +480,83 @@ const CuatrimestreEnrollment: React.FC = () => {
           </div>
         )}
       </div>
+
+      {showPaymentModal && selectedEnrollment && (
+        <div className="modal-overlay" onClick={() => setShowPaymentModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Procesar Pago de Inscripción</h2>
+              <button className="modal-close" onClick={() => setShowPaymentModal(false)}>
+                <FiX />
+              </button>
+            </div>
+            <form onSubmit={handleSubmitPayment} className="form">
+              <div className="form-group">
+                <label htmlFor="payment_method">Método de Pago *</label>
+                <select
+                  id="payment_method"
+                  value={paymentData.payment_method}
+                  onChange={(e) => setPaymentData({ ...paymentData, payment_method: e.target.value })}
+                  required
+                >
+                  <option value="EFECTIVO">Efectivo</option>
+                  <option value="TRANSFERENCIA">Transferencia</option>
+                  <option value="TARJETA">Tarjeta</option>
+                </select>
+              </div>
+
+              {paymentData.payment_method === 'TRANSFERENCIA' && (
+                <>
+                  <div className="form-group">
+                    <label htmlFor="payment_reference">Referencia de Pago</label>
+                    <input
+                      type="text"
+                      id="payment_reference"
+                      value={paymentData.payment_reference}
+                      onChange={(e) => setPaymentData({ ...paymentData, payment_reference: e.target.value })}
+                      placeholder="Número de referencia de transferencia"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="transfer_receipt">Comprobante de Pago</label>
+                    <input
+                      type="file"
+                      id="transfer_receipt"
+                      accept="image/*,.pdf"
+                      onChange={(e) => setPaymentData({ 
+                        ...paymentData, 
+                        transfer_receipt: e.target.files?.[0] || null 
+                      })}
+                    />
+                  </div>
+                </>
+              )}
+
+              {paymentData.payment_method === 'EFECTIVO' && (
+                <div className="form-group">
+                  <label htmlFor="payment_reference">Número de Recibo</label>
+                  <input
+                    type="text"
+                    id="payment_reference"
+                    value={paymentData.payment_reference}
+                    onChange={(e) => setPaymentData({ ...paymentData, payment_reference: e.target.value })}
+                    placeholder="Número de recibo (opcional)"
+                  />
+                </div>
+              )}
+
+              <div className="modal-actions">
+                <button type="button" onClick={() => setShowPaymentModal(false)} className="btn btn-secondary">
+                  Cancelar
+                </button>
+                <button type="submit" className="btn btn-primary">
+                  Procesar Pago
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

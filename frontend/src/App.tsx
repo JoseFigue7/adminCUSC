@@ -9,6 +9,7 @@ import EnrollmentForm from './components/EnrollmentForm';
 import ContractManagement from './components/ContractManagement';
 import PaymentList from './components/PaymentList';
 import PaymentForm from './components/PaymentForm';
+import PendingTransfers from './components/PendingTransfers';
 import AcademicProgress from './components/AcademicProgress';
 import CourseEnrollment from './components/CourseEnrollment';
 import CuatrimestreEnrollment from './components/CuatrimestreEnrollment';
@@ -164,6 +165,7 @@ function AppContent() {
             <Route path="/enrollments/:id/contract" element={<ProtectedRoute requirePermission="manage_students"><ContractManagement /></ProtectedRoute>} />
             <Route path="/students/:id" element={<ProtectedRoute requirePermission="manage_students"><StudentDetail /></ProtectedRoute>} />
             <Route path="/payments" element={<ProtectedRoute requirePermission="manage_payments"><PaymentList /></ProtectedRoute>} />
+            <Route path="/payments/pending-transfers" element={<ProtectedRoute requirePermission="manage_payments"><PendingTransfers /></ProtectedRoute>} />
             <Route path="/payments/new" element={<ProtectedRoute requirePermission="manage_payments"><PaymentForm /></ProtectedRoute>} />
             <Route path="/academics" element={<ProtectedRoute requirePermission="manage_academics"><AcademicProgress /></ProtectedRoute>} />
             <Route path="/courses/enroll" element={<ProtectedRoute requirePermission="manage_academics"><CourseEnrollment /></ProtectedRoute>} />

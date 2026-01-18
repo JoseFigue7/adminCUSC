@@ -626,3 +626,115 @@ class StudentDocument(models.Model):
     def __str__(self):
         return f"{self.get_document_type_display()} - {self.student.get_full_name()}"
 
+
+# ==================== MODELOS DE HISTORIAL DE CAMBIOS DE ESTADO ====================
+
+class EnrollmentStatusHistory(models.Model):
+    """Modelo para rastrear cambios de estado en Enrollment"""
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    
+    # Foreign key al modelo principal
+    enrollment = models.ForeignKey(
+        Enrollment,
+        on_delete=models.CASCADE,
+        related_name='status_history',
+        verbose_name='Inscripción'
+    )
+    
+    # Estados
+    previous_status = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        verbose_name='Estado anterior'
+    )
+    new_status = models.CharField(
+        max_length=50,
+        verbose_name='Estado nuevo'
+    )
+    
+    # Usuario que realizó el cambio
+    changed_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='enrollment_status_changes',
+        verbose_name='Cambiado por'
+    )
+    
+    # Timestamp
+    changed_at = models.DateTimeField(auto_now_add=True, verbose_name='Fecha de cambio')
+    
+    # Comentario opcional
+    comment = models.TextField(blank=True, verbose_name='Comentario')
+    
+    class Meta:
+        verbose_name = 'Historial de Estado de Inscripción'
+        verbose_name_plural = 'Historial de Estados de Inscripciones'
+        ordering = ['-changed_at']
+        indexes = [
+            models.Index(fields=['enrollment', 'changed_at']),
+            models.Index(fields=['changed_at']),
+            models.Index(fields=['enrollment']),
+        ]
+    
+    def __str__(self):
+        return f"Inscripción {self.enrollment.id} - {self.previous_status or 'N/A'} → {self.new_status} ({self.changed_at})"
+
+
+class StudentDocumentStatusHistory(models.Model):
+    """Modelo para rastrear cambios de estado en StudentDocument"""
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    
+    # Foreign key al modelo principal
+    student_document = models.ForeignKey(
+        StudentDocument,
+        on_delete=models.CASCADE,
+        related_name='status_history',
+        verbose_name='Documento'
+    )
+    
+    # Estados
+    previous_status = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        verbose_name='Estado anterior'
+    )
+    new_status = models.CharField(
+        max_length=50,
+        verbose_name='Estado nuevo'
+    )
+    
+    # Usuario que realizó el cambio
+    changed_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='student_document_status_changes',
+        verbose_name='Cambiado por'
+    )
+    
+    # Timestamp
+    changed_at = models.DateTimeField(auto_now_add=True, verbose_name='Fecha de cambio')
+    
+    # Comentario opcional
+    comment = models.TextField(blank=True, verbose_name='Comentario')
+    
+    class Meta:
+        verbose_name = 'Historial de Estado de Documento'
+        verbose_name_plural = 'Historial de Estados de Documentos'
+        ordering = ['-changed_at']
+        indexes = [
+            models.Index(fields=['student_document', 'changed_at']),
+            models.Index(fields=['changed_at']),
+            models.Index(fields=['student_document']),
+        ]
+    
+    def __str__(self):
+        return f"Documento {self.student_document.id} - {self.previous_status or 'N/A'} → {self.new_status} ({self.changed_at})"
+

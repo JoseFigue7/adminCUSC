@@ -3,6 +3,7 @@ from django.core.exceptions import ValidationError
 import re
 from .models import (
     Student, Enrollment, StudentDocument,
+    EnrollmentStatusHistory, StudentDocumentStatusHistory,
     Pais, EntidadFederativa, Idioma, NecesidadEducativaEspecial,
     AntecedenteAcademico, NivelEducativo, ModalidadEducativa, Turno
 )
@@ -202,4 +203,40 @@ class EnrollmentSerializer(serializers.ModelSerializer):
                 })
         
         return attrs
+
+
+# ==================== SERIALIZERS DE HISTORIAL ====================
+
+class EnrollmentStatusHistorySerializer(serializers.ModelSerializer):
+    """Serializer para historial de cambios de estado de inscripciones"""
+    changed_by_username = serializers.CharField(source='changed_by.username', read_only=True)
+    changed_by_full_name = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = EnrollmentStatusHistory
+        fields = '__all__'
+        read_only_fields = ['id', 'changed_at']
+    
+    def get_changed_by_full_name(self, obj):
+        """Obtener nombre completo del usuario que hizo el cambio"""
+        if obj.changed_by:
+            return obj.changed_by.get_full_name()
+        return None
+
+
+class StudentDocumentStatusHistorySerializer(serializers.ModelSerializer):
+    """Serializer para historial de cambios de estado de documentos"""
+    changed_by_username = serializers.CharField(source='changed_by.username', read_only=True)
+    changed_by_full_name = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = StudentDocumentStatusHistory
+        fields = '__all__'
+        read_only_fields = ['id', 'changed_at']
+    
+    def get_changed_by_full_name(self, obj):
+        """Obtener nombre completo del usuario que hizo el cambio"""
+        if obj.changed_by:
+            return obj.changed_by.get_full_name()
+        return None
 

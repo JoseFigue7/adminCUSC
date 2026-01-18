@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { getPayments, approvePayment, rejectPayment, uploadPaymentReceipt, updatePaymentReference, getPaymentTypes, getPendingPaymentsCount } from '../services/api';
-import { FiDollarSign, FiCheck, FiX, FiAlertCircle, FiPlus, FiDownload, FiUpload, FiArrowUp, FiArrowDown, FiEdit2, FiSave } from '../utils/icons';
+import { FiDollarSign, FiCheck, FiX, FiAlertCircle, FiPlus, FiDownload, FiUpload, FiArrowUp, FiArrowDown, FiEdit2, FiSave, FiCreditCard } from '../utils/icons';
 import { useToast } from '../hooks/useToast';
 import Pagination from './Pagination';
 import AdvancedSearch, { FilterParams } from './AdvancedSearch';
+import PaymentDashboard from './PaymentDashboard';
 import './shared.css';
 import './PaymentList.css';
 
@@ -354,19 +355,31 @@ const PaymentList: React.FC = () => {
               <FiPlus /> Nuevo Pago
             </Link>
             {pendingCount > 0 && (
-              <button 
-                className={`btn btn-large ${isPendingFilterActive ? 'btn-primary' : 'btn-warning'}`}
-                onClick={loadPendingStudents}
-                title={isPendingFilterActive ? "Quitar filtro de pendientes" : "Ver pagos pendientes y en revisión"}
-              >
-                <FiAlertCircle /> {pendingCount} Pendientes
-              </button>
+              <>
+                <Link 
+                  to="/payments/pending-transfers"
+                  className="btn btn-warning btn-large"
+                  title="Ver transferencias pendientes de confirmación"
+                >
+                  <FiCreditCard /> {pendingCount} Transferencias Pendientes
+                </Link>
+                <button 
+                  className={`btn btn-large ${isPendingFilterActive ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={loadPendingStudents}
+                  title={isPendingFilterActive ? "Quitar filtro de pendientes" : "Ver todos los pagos pendientes"}
+                >
+                  <FiAlertCircle /> Todos los Pendientes
+                </button>
+              </>
             )}
           </div>
         </div>
       </div>
 
-      <div className="card">
+      {/* Dashboard de Estadísticas */}
+      <PaymentDashboard />
+
+      <div className="card" style={{ marginTop: '2rem' }}>
         <AdvancedSearch
           type="payments"
           filters={filters}

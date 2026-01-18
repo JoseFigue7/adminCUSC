@@ -1,7 +1,11 @@
 from django.contrib import admin
 from django.utils.html import format_html
 from django.urls import reverse
-from .models import Career, Cuatrimestre, Course, CourseEnrollment, CuatrimestreEnrollment, Thesis, CourseSchedule
+from .models import (
+    Career, Cuatrimestre, Course, CourseEnrollment, CuatrimestreEnrollment, Thesis, CourseSchedule,
+    AcademicPeriodConfig, MonthlyPaymentDueDate,
+    CuatrimestreEnrollmentStatusHistory, ThesisStatusHistory
+)
 
 
 class CuatrimestreInline(admin.TabularInline):
@@ -227,6 +231,7 @@ class CourseAdmin(admin.ModelAdmin):
                 'career',
                 'cuatrimestre',
                 ('credits', 'is_required'),
+                'cost',
                 'prerequisite',
             ),
         }),
@@ -453,8 +458,8 @@ class CuatrimestreEnrollmentAdmin(admin.ModelAdmin):
     def status_badge(self, obj):
         """Badge para estado"""
         colors = {
-            'PENDIENTE': '#ffc107',
-            'INSCRITO': '#17a2b8',
+            'PENDIENTE_PAGO': '#ffc107',
+            'PENDIENTE_CONFIRMACION': '#17a2b8',
             'EN_CURSO': '#007bff',
             'FINALIZADO': '#28a745',
             'CANCELADO': '#dc3545'
@@ -679,3 +684,75 @@ class ThesisAdmin(admin.ModelAdmin):
             )
         return format_html('<span style="color: #999;">Sin documento</span>')
     document_link.short_description = 'Documento'
+
+
+@admin.register(AcademicPeriodConfig)
+class AcademicPeriodConfigAdmin(admin.ModelAdmin):
+    """Admin para configuración de períodos académicos"""
+    list_display = ['period', 'penalty_percentage', 'is_active_badge']
+    list_filter = ['is_active', 'period']
+    readonly_fields = ['id', 'created_at', 'updated_at']
+    
+    fieldsets = (
+        ('Información del Período', {
+            'fields': (
+                'period',
+                'penalty_percentage',
+                'is_active',
+            ),
+        }),
+        ('Información del Sistema', {
+            'fields': (
+                'id',
+                ('created_at', 'updated_at'),
+            ),
+            'classes': ('collapse',),
+        }),
+    )
+    
+    def is_active_badge(self, obj):
+        """Badge para estado activo"""
+        if obj.is_active:
+            return format_html(
+                '<span style="background-color: #28a745; color: white; padding: 4px 10px; border-radius: 4px; font-weight: bold;">✓ Activa</span>'
+            )
+        return format_html(
+            '<span style="background-color: #dc3545; color: white; padding: 4px 10px; border-radius: 4px; font-weight: bold;">✗ Inactiva</span>'
+        )
+    is_active_badge.short_description = 'Estado'
+
+
+@admin.register(MonthlyPaymentDueDate)
+class MonthlyPaymentDueDateAdmin(admin.ModelAdmin):
+    """Admin para fechas límite de pago mensuales"""
+    list_display = ['month', 'due_day', 'is_active_badge']
+    list_filter = ['is_active', 'month']
+    readonly_fields = ['id', 'created_at', 'updated_at']
+    
+    fieldsets = (
+        ('Información de Fecha Límite', {
+            'fields': (
+                'month',
+                'due_day',
+                'is_active',
+            ),
+        }),
+        ('Información del Sistema', {
+            'fields': (
+                'id',
+                ('created_at', 'updated_at'),
+            ),
+            'classes': ('collapse',),
+        }),
+    )
+    
+    def is_active_badge(self, obj):
+        """Badge para estado activo"""
+        if obj.is_active:
+            return format_html(
+                '<span style="background-color: #28a745; color: white; padding: 4px 10px; border-radius: 4px; font-weight: bold;">✓ Activa</span>'
+            )
+        return format_html(
+            '<span style="background-color: #dc3545; color: white; padding: 4px 10px; border-radius: 4px; font-weight: bold;">✗ Inactiva</span>'
+        )
+    is_active_badge.short_description = 'Estado'

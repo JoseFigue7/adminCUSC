@@ -120,6 +120,8 @@ export const paymentsApi = {
   getStudentStatus: (studentId: number) =>
     api.get(`/payments/payments/student_status/?student_id=${studentId}`),
   getPendingCount: () => api.get('/payments/payments/pending_count/'),
+  getPendingTransfers: (params?: any) => api.get('/payments/payments/pending_transfers/', { params }),
+  getStatistics: () => api.get('/payments/payments/statistics/'),
   createPaymentIntent: (data: any) => api.post('/payments/public/payment-intent/', data),
   processPublicPayment: (data: any) => api.post('/payments/public/payment/', data),
 };
@@ -162,7 +164,34 @@ export const academicsApi = {
   deleteCuatrimestreEnrollment: (id: string | number) => api.delete(`/academics/cuatrimestre-enrollments/${id}/`),
   enrollCoursesInCuatrimestre: (id: string | number, courseIds: string[]) => 
     api.post(`/academics/cuatrimestre-enrollments/${id}/enroll_courses/`, { course_ids: courseIds }),
+  preAssignCourses: (id: string | number, courseIds: string[]) => 
+    api.post(`/academics/cuatrimestre-enrollments/${id}/pre_assign_courses/`, { course_ids: courseIds }),
   getCoursesInCuatrimestre: (id: string | number) => api.get(`/academics/cuatrimestre-enrollments/${id}/courses/`),
+  getAvailableCourses: (id: string | number) => api.get(`/academics/cuatrimestre-enrollments/${id}/available_courses/`),
+  previewBoleta: (id: string | number) => 
+    api.get(`/academics/cuatrimestre-enrollments/${id}/preview_boleta/`, { responseType: 'blob' }),
+  confirmCourseAssignment: (id: string | number) => 
+    api.post(`/academics/cuatrimestre-enrollments/${id}/confirm_course_assignment/`),
+  // Payment and enrollment flow
+  processEnrollmentPayment: (id: string | number, data: { payment_method: string; payment_reference?: string; transfer_receipt?: File }) => {
+    const formData = new FormData();
+    formData.append('payment_method', data.payment_method);
+    if (data.payment_reference) formData.append('payment_reference', data.payment_reference);
+    if (data.transfer_receipt) formData.append('transfer_receipt', data.transfer_receipt);
+    return api.post(`/academics/cuatrimestre-enrollments/${id}/process_enrollment_payment/`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  approveEnrollmentPayment: (id: string | number) => 
+    api.post(`/academics/cuatrimestre-enrollments/${id}/approve_enrollment_payment/`),
+  rejectEnrollmentPayment: (id: string | number) => 
+    api.post(`/academics/cuatrimestre-enrollments/${id}/reject_enrollment_payment/`),
+  calculateTuition: (id: string | number) => 
+    api.get(`/academics/cuatrimestre-enrollments/${id}/calculate_tuition/`),
+  confirmAssignment: (id: string | number, paymentOption: 'monthly' | 'full') => 
+    api.post(`/academics/cuatrimestre-enrollments/${id}/confirm_assignment/`, { payment_option: paymentOption }),
+  getAssignmentSheet: (id: string | number) => 
+    api.get(`/academics/cuatrimestre-enrollments/${id}/assignment_sheet/`),
   // Bulk grade upload
   bulkUploadGrades: (grades: Array<{ student_id: string; course_id: string; final_grade: number }>) =>
     api.post('/academics/enrollments/bulk_upload_grades/', { grades }),

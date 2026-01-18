@@ -103,7 +103,34 @@ const PaymentFormInner: React.FC<PaymentFormInnerProps> = ({
     }
 
     try {
-      // Confirmar el pago con Stripe
+      // PRIMERO: Crear el registro de pago en la BD con estado PENDIENTE
+      // El webhook será el que lo apruebe cuando el pago sea exitoso
+      const paymentData: any = {
+        carnet: carnet,
+        payment_type: paymentTypeId,
+        amount: amount,
+        payment_intent_id: paymentIntentId,
+      };
+
+      if (month) paymentData.month = month;
+      if (year) paymentData.year = year;
+      if (semester) paymentData.semester = semester;
+      if (quantity) paymentData.quantity = quantity;
+
+      let paymentRecord;
+      try {
+        const response = await processPublicPayment(paymentData);
+        paymentRecord = response.data;
+      } catch (backendError: any) {
+        const errorMessage = backendError.response?.data?.error || 'Error al registrar el pago';
+        setError(errorMessage);
+        onError(errorMessage);
+        setLoading(false);
+        return;
+      }
+
+      // SEGUNDO: Confirmar el pago con Stripe (solo confirmar, NO aprobar en BD)
+      // El webhook payment_intent.succeeded será la única fuente de verdad
       const { error: stripeError, paymentIntent } = await stripe.confirmCardPayment(
         clientSecret,
         {
@@ -121,27 +148,13 @@ const PaymentFormInner: React.FC<PaymentFormInnerProps> = ({
       }
 
       if (paymentIntent?.status === 'succeeded') {
-        // Si el pago fue exitoso en Stripe, procesarlo en nuestro backend
-        try {
-          const paymentData: any = {
-            carnet: carnet,
-            payment_type: paymentTypeId,
-            amount: amount,
-            payment_intent_id: paymentIntentId,
-          };
-
-          if (month) paymentData.month = month;
-          if (year) paymentData.year = year;
-          if (semester) paymentData.semester = semester;
-          if (quantity) paymentData.quantity = quantity;
-
-          const response = await processPublicPayment(paymentData);
-          onSuccess(response.data);
-        } catch (backendError: any) {
-          const errorMessage = backendError.response?.data?.error || 'Error al registrar el pago';
-          setError(errorMessage);
-          onError(errorMessage);
-        }
+        // El pago fue confirmado en Stripe
+        // El webhook se encargará de aprobarlo en la BD automáticamente
+        // Solo mostramos éxito al usuario
+        onSuccess({
+          ...paymentRecord,
+          message: 'Pago confirmado. El pago será procesado automáticamente.',
+        });
       } else {
         setError(`El pago no fue exitoso. Estado: ${paymentIntent?.status}`);
         onError(`El pago no fue exitoso. Estado: ${paymentIntent?.status}`);

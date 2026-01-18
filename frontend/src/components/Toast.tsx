@@ -32,7 +32,7 @@ const Toast: React.FC<ToastProps> = ({ message, type, onClose, duration = 5000 }
   return (
     <div className={`toast toast-${type}`} onClick={onClose}>
       <Icon className="toast-icon" />
-      <span className="toast-message">{message}</span>
+      <div className="toast-message" style={{ whiteSpace: 'pre-line' }}>{message}</div>
       <button className="toast-close" onClick={onClose}>×</button>
     </div>
   );

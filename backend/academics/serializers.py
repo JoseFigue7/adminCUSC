@@ -81,6 +81,9 @@ class CuatrimestreEnrollmentSerializer(serializers.ModelSerializer):
     career_name = serializers.CharField(source='cuatrimestre.career.name', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     courses_count = serializers.SerializerMethodField()
+    can_assign_courses = serializers.SerializerMethodField()
+    can_confirm_assignment = serializers.SerializerMethodField()
+    can_preview_boleta = serializers.SerializerMethodField()
     
     class Meta:
         model = CuatrimestreEnrollment
@@ -95,6 +98,18 @@ class CuatrimestreEnrollmentSerializer(serializers.ModelSerializer):
     def get_courses_count(self, obj):
         """Contar cursos inscritos en este cuatrimestre"""
         return obj.course_enrollments.count()
+    
+    def get_can_assign_courses(self, obj):
+        """Verificar si se pueden asignar cursos"""
+        return obj.can_assign_courses()
+    
+    def get_can_confirm_assignment(self, obj):
+        """Verificar si se puede confirmar la asignación"""
+        return obj.can_confirm_assignment()
+    
+    def get_can_preview_boleta(self, obj):
+        """Verificar si se puede generar boleta de asignación"""
+        return obj.can_preview_boleta()
 
 
 class CourseEnrollmentSerializer(serializers.ModelSerializer):

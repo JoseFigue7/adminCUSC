@@ -68,8 +68,12 @@ class PaymentFilter(django_filters.FilterSet):
         return queryset
     
     def filter_pending(self, queryset, name, value):
-        """Filtrar por pagos pendientes (PENDIENTE y EN_REVISION)"""
+        """Filtrar por pagos pendientes (solo transferencias en PENDIENTE y EN_REVISION)"""
         # Manejar tanto booleanos como strings ('true', 'True', '1', etc.)
         if value in (True, 'true', 'True', '1', 1):
-            return queryset.filter(status__in=['PENDIENTE', 'EN_REVISION'])
+            # Solo mostrar transferencias pendientes
+            return queryset.filter(
+                payment_method='TRANSFERENCIA',
+                status__in=['PENDIENTE', 'EN_REVISION']
+            )
         return queryset

@@ -140,3 +140,4 @@ Los tipos de pago se gestionan a través del modelo `PaymentType` que permite:
 
 
 
+

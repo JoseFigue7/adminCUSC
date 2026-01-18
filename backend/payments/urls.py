@@ -7,7 +7,8 @@ from .views import (
     PaymentTypeViewSet,
     get_student_by_carnet,
     create_payment_intent,
-    process_public_payment
+    process_public_payment,
+    stripe_webhook
 )
 
 router = DefaultRouter()
@@ -21,5 +22,6 @@ urlpatterns = [
     path('public/student/', get_student_by_carnet, name='get-student-by-carnet'),
     path('public/payment-intent/', create_payment_intent, name='create-payment-intent'),
     path('public/payment/', process_public_payment, name='process-public-payment'),
+    path('stripe/webhook/', stripe_webhook, name='stripe-webhook'),
 ]
 

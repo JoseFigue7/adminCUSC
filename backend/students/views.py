@@ -10,11 +10,13 @@ import logging
 import os
 from .models import (
     Student, Enrollment, StudentDocument,
+    EnrollmentStatusHistory, StudentDocumentStatusHistory,
     Pais, EntidadFederativa, Idioma, NecesidadEducativaEspecial,
     AntecedenteAcademico, NivelEducativo, ModalidadEducativa, Turno
 )
 from .serializers import (
     StudentSerializer, EnrollmentSerializer, StudentDocumentSerializer,
+    EnrollmentStatusHistorySerializer, StudentDocumentStatusHistorySerializer,
     PaisSerializer, EntidadFederativaSerializer, IdiomaSerializer,
     NecesidadEducativaEspecialSerializer, AntecedenteAcademicoSerializer,
     NivelEducativoSerializer, ModalidadEducativaSerializer, TurnoSerializer
@@ -241,10 +243,24 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                 )
         
         enrollment = serializer.save()
+        
+        # Pasar usuario para el historial de cambios
+        user = request.user if request.user.is_authenticated else None
+        enrollment._changed_by_user = user
+        enrollment._status_change_notes = 'Inscripción creada'
+        
         return Response(
             EnrollmentSerializer(enrollment, context={'request': request}).data, 
             status=status.HTTP_201_CREATED
         )
+    
+    def perform_update(self, serializer):
+        """Capturar usuario que realiza el cambio"""
+        user = self.request.user if self.request.user.is_authenticated else None
+        instance = serializer.save()
+        instance._changed_by_user = user
+        instance._status_change_notes = self.request.data.get('notes', '') or ''
+        return instance
     
     @action(detail=True, methods=['get'])
     def generate_contract(self, request, pk=None):
@@ -401,6 +417,22 @@ class StudentDocumentViewSet(viewsets.ModelViewSet):
         if student_id:
             queryset = queryset.filter(student_id=student_id)
         return queryset
+    
+    def perform_create(self, serializer):
+        """Capturar usuario que crea el documento"""
+        user = self.request.user if self.request.user.is_authenticated else None
+        instance = serializer.save()
+        instance._changed_by_user = user
+        instance._status_change_notes = 'Documento creado'
+        return instance
+    
+    def perform_update(self, serializer):
+        """Capturar usuario que realiza el cambio"""
+        user = self.request.user if self.request.user.is_authenticated else None
+        instance = serializer.save()
+        instance._changed_by_user = user
+        instance._status_change_notes = self.request.data.get('notes', '') or ''
+        return instance
     
     def get_permissions(self):
         """Permisos específicos por acción"""
@@ -664,4 +696,28 @@ class TurnoViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ['nombre', 'codigo']
     ordering_fields = ['nombre', 'codigo']
     ordering = ['nombre']
+
+
+class EnrollmentStatusHistoryViewSet(viewsets.ReadOnlyModelViewSet):
+    """ViewSet para consultar historial de cambios de estado de inscripciones"""
+    queryset = EnrollmentStatusHistory.objects.all()
+    serializer_class = EnrollmentStatusHistorySerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['enrollment', 'changed_by']
+    search_fields = ['previous_status', 'new_status', 'comment']
+    ordering_fields = ['changed_at']
+    ordering = ['-changed_at']
+
+
+class StudentDocumentStatusHistoryViewSet(viewsets.ReadOnlyModelViewSet):
+    """ViewSet para consultar historial de cambios de estado de documentos"""
+    queryset = StudentDocumentStatusHistory.objects.all()
+    serializer_class = StudentDocumentStatusHistorySerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['student_document', 'changed_by']
+    search_fields = ['previous_status', 'new_status', 'comment']
+    ordering_fields = ['changed_at']
+    ordering = ['-changed_at']
 

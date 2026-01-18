@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     'documents',
     'certificates',
     'reports',
+    'audit',  # Sistema de auditoría
 ]
 
 MIDDLEWARE = [
@@ -58,6 +59,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'audit.middleware.AuditMiddleware',  # Middleware de auditoría (debe ir después de AuthenticationMiddleware)
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -336,3 +338,8 @@ STRIPE_SECRET_KEY = config('STRIPE_SECRET_KEY', default='')
 STRIPE_PUBLISHABLE_KEY = config('STRIPE_PUBLISHABLE_KEY', default='')
 STRIPE_WEBHOOK_SECRET = config('STRIPE_WEBHOOK_SECRET', default='')
 
+# Audit Configuration
+AUDIT_ENABLED = config('AUDIT_ENABLED', default=True, cast=bool)
+# Lista de modelos a auditar (None = todos los modelos excepto AuditLog)
+# Formato: ['app_label.ModelName', 'app_label.ModelName']
+AUDIT_MODELS = config('AUDIT_MODELS', default=None, cast=lambda v: v.split(',') if v else None)

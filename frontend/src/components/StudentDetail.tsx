@@ -9,7 +9,7 @@ import {
 } from '../services/api';
 import { 
   FiUser, FiFileText, FiDownload, FiUpload, FiCheckCircle, 
-  FiXCircle, FiEdit, FiTrendingUp, FiArrowLeft, FiBook, FiPlus, FiCalendar
+  FiXCircle, FiEdit, FiTrendingUp, FiArrowLeft, FiBook, FiCalendar
 } from '../utils/icons';
 import { useToast } from '../hooks/useToast';
 import './shared.css';
@@ -358,9 +358,6 @@ const StudentDetail: React.FC = () => {
             </Link>
             <Link to={`/cuatrimestre-enrollments?studentId=${id}`} className="btn btn-primary btn-large">
               <FiCalendar /> Inscripciones a Cuatrimestres
-            </Link>
-            <Link to={`/courses/enroll?studentId=${id}`} className="btn btn-primary btn-large">
-              <FiPlus /> Matricular Cursos
             </Link>
             <Link to={`/careers/${student.career}/pensum`} className="btn btn-secondary btn-large">
               <FiBook /> Ver Pensum

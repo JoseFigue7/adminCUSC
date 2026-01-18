@@ -1,5 +1,7 @@
-from django.db import models
+from django.db import models, transaction
 from django.core.validators import MinValueValidator, MaxValueValidator, RegexValidator
+from django.core.exceptions import ValidationError
+from decimal import Decimal
 import uuid
 
 
@@ -125,6 +127,14 @@ class Course(models.Model):
     code = models.CharField(max_length=20, verbose_name='Código del curso')
     name = models.CharField(max_length=200, verbose_name='Nombre del curso')
     credits = models.IntegerField(default=0, verbose_name='Créditos')
+    cost = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        validators=[MinValueValidator(Decimal('0.00'))],
+        verbose_name='Costo del curso',
+        help_text='Costo de la colegiatura para este curso'
+    )
     is_required = models.BooleanField(default=True, verbose_name='Obligatorio')
     prerequisite = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, verbose_name='Prerequisito')
     
@@ -265,12 +275,173 @@ def get_cuatrimestres_by_period(period):
     return period_map.get(period, [])
 
 
+class CuatrimestreEnrollmentManager(models.Manager):
+    """Manager personalizado para CuatrimestreEnrollment con validación thread-safe"""
+    
+    def create_with_en_curso_validation(self, **kwargs):
+        """
+        Crear una inscripción validando que el estudiante no tenga otra EN_CURSO.
+        Usa select_for_update() para prevenir condiciones de carrera.
+        """
+        student = kwargs.get('student')
+        status = kwargs.get('status', 'PENDIENTE_PAGO')
+        
+        if not student:
+            raise ValueError("El campo 'student' es requerido")
+        
+        # Solo validar si el estado es EN_CURSO
+        if status == 'EN_CURSO':
+            with transaction.atomic():
+                # Bloquear filas existentes con EN_CURSO para este estudiante
+                existing = self.select_for_update().filter(
+                    student=student,
+                    status='EN_CURSO'
+                ).first()
+                
+                if existing:
+                    raise ValidationError({
+                        'status': (
+                            f'El estudiante ya tiene una inscripción EN_CURSO en '
+                            f'{existing.cuatrimestre.name} ({existing.academic_year}). '
+                            f'Debe finalizar ese período académico antes de inscribirse a otro cuatrimestre.'
+                        )
+                    })
+                
+                # Crear la nueva inscripción
+                return self.create(**kwargs)
+        else:
+            # Para otros estados, crear normalmente
+            return self.create(**kwargs)
+    
+    def update_to_en_curso(self, enrollment, **update_fields):
+        """
+        Actualizar una inscripción a EN_CURSO validando que no haya otra EN_CURSO.
+        Usa select_for_update() para prevenir condiciones de carrera.
+        """
+        student = enrollment.student
+        
+        with transaction.atomic():
+            # Bloquear filas existentes con EN_CURSO para este estudiante
+            existing = self.select_for_update().filter(
+                student=student,
+                status='EN_CURSO'
+            ).exclude(pk=enrollment.pk).first()
+            
+            if existing:
+                raise ValidationError({
+                    'status': (
+                        f'El estudiante ya tiene una inscripción EN_CURSO en '
+                        f'{existing.cuatrimestre.name} ({existing.academic_year}). '
+                        f'Debe finalizar ese período académico antes de inscribirse a otro cuatrimestre.'
+                    )
+                })
+            
+            # Actualizar campos en el objeto
+            enrollment.status = 'EN_CURSO'
+            for field, value in update_fields.items():
+                setattr(enrollment, field, value)
+            
+            # Validar antes de guardar
+            enrollment.full_clean()
+            
+            # Usar update() del QuerySet para evitar recursión en save()
+            update_data = {'status': 'EN_CURSO'}
+            update_data.update(update_fields)
+            self.filter(pk=enrollment.pk).update(**update_data)
+            
+            # Refrescar el objeto desde la BD
+            enrollment.refresh_from_db()
+            return enrollment
+
+
+class AcademicPeriodConfig(models.Model):
+    """Modelo para configuración de períodos académicos (fechas límite de pago, mora, etc.)"""
+    
+    PERIOD_CHOICES = [
+        (1, 'Período 1 (Enero-Abril)'),
+        (2, 'Período 2 (Mayo-Agosto)'),
+        (3, 'Período 3 (Septiembre-Diciembre)'),
+    ]
+    
+    MONTH_CHOICES = [
+        (1, 'Enero'), (2, 'Febrero'), (3, 'Marzo'), (4, 'Abril'),
+        (5, 'Mayo'), (6, 'Junio'), (7, 'Julio'), (8, 'Agosto'),
+        (9, 'Septiembre'), (10, 'Octubre'), (11, 'Noviembre'), (12, 'Diciembre'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    period = models.IntegerField(choices=PERIOD_CHOICES, unique=True, verbose_name='Período Académico')
+    penalty_percentage = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal('5.00'),
+        validators=[MinValueValidator(Decimal('0.00')), MaxValueValidator(Decimal('100.00'))],
+        verbose_name='Porcentaje de Mora (%)',
+        help_text='Porcentaje de mora aplicado sobre el monto del pago cuando se excede la fecha límite'
+    )
+    is_active = models.BooleanField(default=True, verbose_name='Activa')
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = 'Configuración de Período Académico'
+        verbose_name_plural = 'Configuraciones de Períodos Académicos'
+        ordering = ['period']
+    
+    def __str__(self):
+        return f"Período {self.period} - Mora: {self.penalty_percentage}%"
+    
+    def get_months(self):
+        """Retorna los meses que corresponden a este período"""
+        period_months = {
+            1: [1, 2, 3, 4],  # Enero-Abril
+            2: [5, 6, 7, 8],  # Mayo-Agosto
+            3: [9, 10, 11, 12],  # Septiembre-Diciembre
+        }
+        return period_months.get(self.period, [])
+
+
+class MonthlyPaymentDueDate(models.Model):
+    """Modelo para fechas límite de pago por mes"""
+    
+    MONTH_CHOICES = [
+        (1, 'Enero'), (2, 'Febrero'), (3, 'Marzo'), (4, 'Abril'),
+        (5, 'Mayo'), (6, 'Junio'), (7, 'Julio'), (8, 'Agosto'),
+        (9, 'Septiembre'), (10, 'Octubre'), (11, 'Noviembre'), (12, 'Diciembre'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    month = models.IntegerField(choices=MONTH_CHOICES, unique=True, verbose_name='Mes')
+    due_day = models.IntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(31)],
+        default=10,
+        verbose_name='Día límite de pago',
+        help_text='Día del mes en que vence el pago (ej: 10 = día 10 de cada mes)'
+    )
+    is_active = models.BooleanField(default=True, verbose_name='Activa')
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = 'Fecha Límite de Pago Mensual'
+        verbose_name_plural = 'Fechas Límite de Pago Mensuales'
+        ordering = ['month']
+    
+    def __str__(self):
+        month_name = dict(self.MONTH_CHOICES)[self.month]
+        return f"{month_name} - Día {self.due_day}"
+
+
 class CuatrimestreEnrollment(models.Model):
     """Modelo para inscripción de estudiantes en un cuatrimestre específico de un año académico"""
     
     STATUS_CHOICES = [
-        ('PENDIENTE', 'Pendiente'),
-        ('INSCRITO', 'Inscrito'),
+        ('PRE_INSCRIPCION', 'Pre-inscripción'),
+        ('CURSOS_PREASIGNADOS', 'Cursos Pre-asignados'),
+        ('PENDIENTE_PAGO', 'Pendiente de Pago'),
+        ('PENDIENTE_CONFIRMACION', 'Pendiente de Confirmación'),
         ('EN_CURSO', 'En Curso'),
         ('FINALIZADO', 'Finalizado'),
         ('CANCELADO', 'Cancelado'),
@@ -296,15 +467,29 @@ class CuatrimestreEnrollment(models.Model):
     )
     enrollment_date = models.DateField(auto_now_add=True, verbose_name='Fecha de inscripción')
     status = models.CharField(
-        max_length=20, 
+        max_length=25, 
         choices=STATUS_CHOICES, 
-        default='INSCRITO', 
+        default='PRE_INSCRIPCION', 
         verbose_name='Estado'
+    )
+    # Campos para el flujo presencial guiado
+    is_first_enrollment = models.BooleanField(
+        default=False,
+        verbose_name='Primera inscripción',
+        help_text='Indica si esta es la primera inscripción del estudiante (exoneración de cuota de inscripción)'
+    )
+    is_enrollment_fee_exempt = models.BooleanField(
+        default=False,
+        verbose_name='Exonerado de cuota de inscripción',
+        help_text='Si es primera inscripción, se omite el pago de inscripción'
     )
     notes = models.TextField(blank=True, verbose_name='Notas')
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    
+    # Manager personalizado
+    objects = CuatrimestreEnrollmentManager()
     
     class Meta:
         verbose_name = 'Inscripción a Cuatrimestre'
@@ -314,6 +499,14 @@ class CuatrimestreEnrollment(models.Model):
         indexes = [
             models.Index(fields=['student', 'academic_year']),
             models.Index(fields=['academic_year', 'cuatrimestre']),
+            models.Index(fields=['student', 'status'], condition=models.Q(status='EN_CURSO'), name='idx_student_en_curso'),
+        ]
+        constraints = [
+            # Nota: Un constraint único condicional (UNIQUE WHERE status='EN_CURSO') 
+            # no es directamente soportado por Django para SQLite/MySQL de forma estándar.
+            # La validación se realiza a nivel de aplicación usando el manager con select_for_update().
+            # Para MySQL, se podría crear un índice único parcial mediante migración personalizada,
+            # pero para mantener compatibilidad con SQLite, usamos validación a nivel de aplicación.
         ]
     
     def __str__(self):
@@ -321,8 +514,6 @@ class CuatrimestreEnrollment(models.Model):
     
     def clean(self):
         """Validar restricciones de negocio académicas"""
-        from django.core.exceptions import ValidationError
-        
         if self.student and self.cuatrimestre:
             if not self.student.career:
                 raise ValidationError({
@@ -341,23 +532,83 @@ class CuatrimestreEnrollment(models.Model):
                     'academic_year': 'El año académico debe estar entre 1900 y 9999.'
                 })
         
-        # REGLA DE NEGOCIO: Un estudiante solo puede tener UNA inscripción EN_CURSO a la vez
-        # Solo se aplica cuando se está creando una nueva inscripción o cambiando a EN_CURSO
-        if self.student and (not self.pk or self.status == 'EN_CURSO'):
-            existing_enrollment = CuatrimestreEnrollment.objects.filter(
+        # NOTA: La validación de solo una EN_CURSO se hace en el manager
+        # con select_for_update() para prevenir condiciones de carrera.
+        # Esta validación en clean() es una capa adicional de seguridad.
+        if self.student and self.status == 'EN_CURSO':
+            # Solo validar si no estamos en una transacción con select_for_update
+            # (el manager ya lo hace de forma thread-safe)
+            existing_enrollment = self.__class__.objects.filter(
                 student=self.student,
                 status='EN_CURSO'
             ).exclude(pk=self.pk if self.pk else None).first()
             
             if existing_enrollment:
                 raise ValidationError({
-                    'status': f'El estudiante ya tiene una inscripción EN_CURSO en {existing_enrollment.cuatrimestre.name} ({existing_enrollment.academic_year}). Debe finalizar ese período académico antes de inscribirse a otro cuatrimestre.'
+                    'status': (
+                        f'El estudiante ya tiene una inscripción EN_CURSO en '
+                        f'{existing_enrollment.cuatrimestre.name} ({existing_enrollment.academic_year}). '
+                        f'Debe finalizar ese período académico antes de inscribirse a otro cuatrimestre.'
+                    )
                 })
     
     def save(self, *args, **kwargs):
-        """Validar antes de guardar"""
+        """
+        Guardar con validación.
+        Si el estado es EN_CURSO y es una actualización, usar el manager para validación thread-safe.
+        Aplicar regla: si is_first_enrollment == True, entonces is_enrollment_fee_exempt = True
+        """
+        # Regla de negocio: Si es primera inscripción, exonerar automáticamente
+        if self.is_first_enrollment:
+            self.is_enrollment_fee_exempt = True
+        
+        # Si estamos cambiando a EN_CURSO y ya existe el objeto, usar el manager
+        if self.pk and self.status == 'EN_CURSO':
+            # Obtener el estado anterior
+            try:
+                old_instance = self.__class__.objects.get(pk=self.pk)
+                if old_instance.status != 'EN_CURSO':
+                    # Estamos cambiando a EN_CURSO, usar el manager
+                    self.__class__.objects.update_to_en_curso(self)
+                    return
+            except self.__class__.DoesNotExist:
+                pass
+        
+        # Validar antes de guardar
         self.full_clean()
         super().save(*args, **kwargs)
+    
+    def calculate_total_tuition(self):
+        """Calcular el costo total de la colegiatura basado en los cursos asignados"""
+        from decimal import Decimal
+        total = Decimal('0.00')
+        for enrollment in self.course_enrollments.select_related('course').all():
+            total += enrollment.course.cost or Decimal('0.00')
+        return total
+    
+    def get_academic_period(self):
+        """Obtener el período académico de este cuatrimestre"""
+        if self.cuatrimestre:
+            return get_academic_period(self.cuatrimestre.number)
+        return None
+    
+    def can_assign_courses(self):
+        """Verificar si se pueden asignar cursos (debe estar en PRE_INSCRIPCION o CURSOS_PREASIGNADOS)"""
+        return self.status in ['PRE_INSCRIPCION', 'CURSOS_PREASIGNADOS']
+    
+    def can_confirm_assignment(self):
+        """Verificar si se puede confirmar la asignación (debe estar en CURSOS_PREASIGNADOS con cursos)"""
+        return (
+            self.status == 'CURSOS_PREASIGNADOS' and
+            self.course_enrollments.count() > 0
+        )
+    
+    def can_preview_boleta(self):
+        """Verificar si se puede generar boleta de asignación (debe tener cursos pre-asignados)"""
+        return (
+            self.status == 'CURSOS_PREASIGNADOS' and
+            self.course_enrollments.count() > 0
+        )
 
 
 class CourseEnrollment(models.Model):
@@ -551,4 +802,116 @@ class Thesis(models.Model):
     
     def __str__(self):
         return f"Tesis de {self.student.get_full_name()} - {self.get_status_display()}"
+
+
+# ==================== MODELOS DE HISTORIAL DE CAMBIOS DE ESTADO ====================
+
+class CuatrimestreEnrollmentStatusHistory(models.Model):
+    """Modelo para rastrear cambios de estado en CuatrimestreEnrollment"""
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    
+    # Foreign key al modelo principal
+    cuatrimestre_enrollment = models.ForeignKey(
+        CuatrimestreEnrollment,
+        on_delete=models.CASCADE,
+        related_name='status_history',
+        verbose_name='Inscripción al Cuatrimestre'
+    )
+    
+    # Estados
+    previous_status = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        verbose_name='Estado anterior'
+    )
+    new_status = models.CharField(
+        max_length=50,
+        verbose_name='Estado nuevo'
+    )
+    
+    # Usuario que realizó el cambio
+    changed_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='cuatrimestre_enrollment_status_changes',
+        verbose_name='Cambiado por'
+    )
+    
+    # Timestamp
+    changed_at = models.DateTimeField(auto_now_add=True, verbose_name='Fecha de cambio')
+    
+    # Comentario opcional
+    comment = models.TextField(blank=True, verbose_name='Comentario')
+    
+    class Meta:
+        verbose_name = 'Historial de Estado de Inscripción a Cuatrimestre'
+        verbose_name_plural = 'Historial de Estados de Inscripciones a Cuatrimestres'
+        ordering = ['-changed_at']
+        indexes = [
+            models.Index(fields=['cuatrimestre_enrollment', 'changed_at']),
+            models.Index(fields=['changed_at']),
+            models.Index(fields=['cuatrimestre_enrollment']),
+        ]
+    
+    def __str__(self):
+        return f"Inscripción Cuatrimestre {self.cuatrimestre_enrollment.id} - {self.previous_status or 'N/A'} → {self.new_status} ({self.changed_at})"
+
+
+class ThesisStatusHistory(models.Model):
+    """Modelo para rastrear cambios de estado en Thesis"""
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    
+    # Foreign key al modelo principal
+    thesis = models.ForeignKey(
+        Thesis,
+        on_delete=models.CASCADE,
+        related_name='status_history',
+        verbose_name='Tesis'
+    )
+    
+    # Estados
+    previous_status = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        verbose_name='Estado anterior'
+    )
+    new_status = models.CharField(
+        max_length=50,
+        verbose_name='Estado nuevo'
+    )
+    
+    # Usuario que realizó el cambio
+    changed_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='thesis_status_changes',
+        verbose_name='Cambiado por'
+    )
+    
+    # Timestamp
+    changed_at = models.DateTimeField(auto_now_add=True, verbose_name='Fecha de cambio')
+    
+    # Comentario opcional
+    comment = models.TextField(blank=True, verbose_name='Comentario')
+    
+    class Meta:
+        verbose_name = 'Historial de Estado de Tesis'
+        verbose_name_plural = 'Historial de Estados de Tesis'
+        ordering = ['-changed_at']
+        indexes = [
+            models.Index(fields=['thesis', 'changed_at']),
+            models.Index(fields=['changed_at']),
+            models.Index(fields=['thesis']),
+        ]
+    
+    def __str__(self):
+        return f"Tesis {self.thesis.id} - {self.previous_status or 'N/A'} → {self.new_status} ({self.changed_at})"
 

@@ -4,6 +4,7 @@ from django.urls import reverse
 from django.utils.safestring import mark_safe
 from .models import (
     Student, Enrollment, StudentDocument,
+    EnrollmentStatusHistory, StudentDocumentStatusHistory,
     Pais, EntidadFederativa, Idioma, NecesidadEducativaEspecial,
     AntecedenteAcademico, NivelEducativo, ModalidadEducativa, Turno
 )
@@ -486,3 +487,109 @@ class TurnoAdmin(admin.ModelAdmin):
     list_filter = ['is_active']
     search_fields = ['codigo', 'nombre']
     ordering = ['nombre']
+
+
+@admin.register(EnrollmentStatusHistory)
+class EnrollmentStatusHistoryAdmin(admin.ModelAdmin):
+    """Admin para historial de cambios de estado de inscripciones"""
+    list_display = [
+        'enrollment_link', 'previous_status_display', 'new_status_display',
+        'changed_by_display', 'changed_at'
+    ]
+    list_filter = ['changed_at', 'changed_by', 'new_status']
+    search_fields = ['previous_status', 'new_status', 'comment', 'enrollment__student__first_name']
+    readonly_fields = ['id', 'changed_at']
+    ordering = ['-changed_at']
+    date_hierarchy = 'changed_at'
+    
+    def enrollment_link(self, obj):
+        """Link a la inscripción"""
+        url = reverse('admin:students_enrollment_change', args=[obj.enrollment.pk])
+        return format_html(
+            '<a href="{}">{}</a>',
+            url,
+            str(obj.enrollment)
+        )
+    enrollment_link.short_description = 'Inscripción'
+    
+    def previous_status_display(self, obj):
+        """Display del estado anterior"""
+        if obj.previous_status:
+            return format_html(
+                '<span style="background-color: #ffc107; color: white; padding: 3px 8px; border-radius: 3px;">{}</span>',
+                obj.previous_status
+            )
+        return format_html('<span style="color: #999;">-</span>')
+    previous_status_display.short_description = 'Estado Anterior'
+    
+    def new_status_display(self, obj):
+        """Display del estado nuevo"""
+        return format_html(
+            '<span style="background-color: #28a745; color: white; padding: 3px 8px; border-radius: 3px;">{}</span>',
+            obj.new_status
+        )
+    new_status_display.short_description = 'Estado Nuevo'
+    
+    def changed_by_display(self, obj):
+        """Display del usuario que hizo el cambio"""
+        if obj.changed_by:
+            return format_html(
+                '<strong>{}</strong> ({})',
+                obj.changed_by.get_full_name() or obj.changed_by.username,
+                obj.changed_by.username
+            )
+        return format_html('<span style="color: #999;">Sistema</span>')
+    changed_by_display.short_description = 'Cambiado Por'
+
+
+@admin.register(StudentDocumentStatusHistory)
+class StudentDocumentStatusHistoryAdmin(admin.ModelAdmin):
+    """Admin para historial de cambios de estado de documentos"""
+    list_display = [
+        'document_link', 'previous_status_display', 'new_status_display',
+        'changed_by_display', 'changed_at'
+    ]
+    list_filter = ['changed_at', 'changed_by', 'new_status']
+    search_fields = ['previous_status', 'new_status', 'comment', 'student_document__student__first_name']
+    readonly_fields = ['id', 'changed_at']
+    ordering = ['-changed_at']
+    date_hierarchy = 'changed_at'
+    
+    def document_link(self, obj):
+        """Link al documento"""
+        url = reverse('admin:students_studentdocument_change', args=[obj.student_document.pk])
+        return format_html(
+            '<a href="{}">{}</a>',
+            url,
+            str(obj.student_document)
+        )
+    document_link.short_description = 'Documento'
+    
+    def previous_status_display(self, obj):
+        """Display del estado anterior"""
+        if obj.previous_status:
+            return format_html(
+                '<span style="background-color: #ffc107; color: white; padding: 3px 8px; border-radius: 3px;">{}</span>',
+                obj.previous_status
+            )
+        return format_html('<span style="color: #999;">-</span>')
+    previous_status_display.short_description = 'Estado Anterior'
+    
+    def new_status_display(self, obj):
+        """Display del estado nuevo"""
+        return format_html(
+            '<span style="background-color: #28a745; color: white; padding: 3px 8px; border-radius: 3px;">{}</span>',
+            obj.new_status
+        )
+    new_status_display.short_description = 'Estado Nuevo'
+    
+    def changed_by_display(self, obj):
+        """Display del usuario que hizo el cambio"""
+        if obj.changed_by:
+            return format_html(
+                '<strong>{}</strong> ({})',
+                obj.changed_by.get_full_name() or obj.changed_by.username,
+                obj.changed_by.username
+            )
+        return format_html('<span style="color: #999;">Sistema</span>')
+    changed_by_display.short_description = 'Cambiado Por'

@@ -12,14 +12,34 @@ class PaymentSerializer(serializers.ModelSerializer):
     payment_type_code = serializers.CharField(source='payment_type.code', read_only=True)
     total_amount = serializers.SerializerMethodField()
     
+    # Información de trazabilidad
+    career_name = serializers.CharField(source='career.name', read_only=True)
+    career_code = serializers.CharField(source='career.code', read_only=True)
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+    created_by_username = serializers.CharField(source='created_by.username', read_only=True)
+    approved_by_name = serializers.CharField(source='approved_by.get_full_name', read_only=True)
+    approved_by_username = serializers.CharField(source='approved_by.username', read_only=True)
+    
     class Meta:
         model = Payment
         fields = '__all__'
     
     def get_total_amount(self, obj):
-        """Retorna el monto total (base + mora)"""
+        """
+        Retorna el monto total del pago.
+        
+        Prioriza final_amount (nuevo campo), pero mantiene compatibilidad
+        con registros antiguos usando amount o base_amount + penalty_amount.
+        """
+        # Usar final_amount si está disponible (nuevo campo calculado)
+        if obj.final_amount:
+            return str(obj.final_amount)
+        
+        # Compatibilidad con registros antiguos
         if obj.base_amount:
             return str(obj.base_amount + obj.penalty_amount)
+        
+        # Fallback al campo amount (deprecated pero mantenido para compatibilidad)
         return str(obj.amount)
 
 
