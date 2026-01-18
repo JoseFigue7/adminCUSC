@@ -59,7 +59,7 @@ def generate_contract(student, enrollment):
             'full_name': full_name,  # Agregar nombre completo al contexto
             'student_name': full_name,  # Alias para compatibilidad
             'logo_base64': logo_base64,  # Logo en base64
-            'institution_name': 'Centro Universitario Santa Cecilia',
+            'institution_name': 'Colegio Santa Cecilia',
             'institution_acronym': 'CUSC',
             'institution_address': 'Calle Yaquis, Lt 1, Mz. 11, Esquina Huehuecoyotl, Colonia Culturas de México, Chalco, Estado de México, C.P. 56607',
             'institution_maps_url': 'https://maps.app.goo.gl/pEUgydbTAhGRzDQ97',  # URL de Google Maps proporcionada
@@ -85,7 +85,7 @@ def generate_contract(student, enrollment):
             <body>
                 <div class="header">
                     <h1>CONTRATO DE INSCRIPCIÓN</h1>
-                    <p>Centro Universitario Santa Cecilia</p>
+                    <p>Colegio Santa Cecilia</p>
                 </div>
                 <div>
                     <p><strong>EL ESTUDIANTE:</strong> {full_name}, 
@@ -94,7 +94,7 @@ def generate_contract(student, enrollment):
                     quien en lo sucesivo se denominará "EL ESTUDIANTE".</p>
                 </div>
                 <div>
-                    <p><strong>LA INSTITUCIÓN:</strong> Centro Universitario Santa Cecilia (CUSC), 
+                    <p><strong>LA INSTITUCIÓN:</strong> Colegio Santa Cecilia (CUSC), 
                     con domicilio en Calle Yaquis, Lt 1, Mz. 11, Esquina Huehuecoyotl, Colonia Culturas de México, Chalco, Estado de México, C.P. 56607, 
                     quien en lo sucesivo se denominará "LA INSTITUCIÓN".</p>
                 </div>

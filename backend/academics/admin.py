@@ -71,6 +71,7 @@ class CareerAdmin(admin.ModelAdmin):
         }),
         ('Información SEP - RVOE', {
             'fields': (
+                'rvoe',
                 ('rvoe_agreement_number', 'rvoe_agreement_date'),
             ),
         }),

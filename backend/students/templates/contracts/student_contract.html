@@ -63,11 +63,11 @@
     <div class="header">
         {% if logo_base64 %}
         <div class="logo-container">
-            <img src="{{ logo_base64 }}" alt="Logo Centro Universitario Santa Cecilia" />
+            <img src="{{ logo_base64 }}" alt="Logo Colegio Santa Cecilia" />
         </div>
         {% endif %}
         <div class="contract-title">CONTRATO DE INSCRIPCIÓN</div>
-        <p class="institution-name">{{ institution_name|default:"Centro Universitario Santa Cecilia" }}</p>
+        <p class="institution-name">{{ institution_name|default:"Colegio Santa Cecilia" }}</p>
     </div>
     
     <div class="section">
@@ -83,7 +83,7 @@
     </div>
     
     <div class="section">
-        <p><strong>LA INSTITUCIÓN:</strong> {{ institution_name|default:"Centro Universitario Santa Cecilia" }} ({{ institution_acronym|default:"CUSC" }}), 
+        <p><strong>LA INSTITUCIÓN:</strong> {{ institution_name|default:"Colegio Santa Cecilia" }} ({{ institution_acronym|default:"CUSC" }}), 
         {% if institution_address %}con domicilio en {{ institution_address }}, {% endif %}
         quien en lo sucesivo se denominará "LA INSTITUCIÓN".</p>
     </div>
@@ -129,7 +129,7 @@
         </div>
         <div class="signature-box">
             <p><strong>LA INSTITUCIÓN</strong></p>
-            <p style="margin-top: 40px;">{{ institution_name|default:"Centro Universitario Santa Cecilia" }}</p>
+            <p style="margin-top: 40px;">{{ institution_name|default:"Colegio Santa Cecilia" }}</p>
             {% if institution_address %}
             <p style="margin-top: 5px; font-size: 11px;">{{ institution_address }}</p>
             {% endif %}
@@ -144,7 +144,7 @@
     <div class="section" style="margin-top: 30px; font-size: 10px; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 15px;">
         <p>Este documento debe ser firmado por ambas partes y escaneado para completar el proceso de inscripción.</p>
         {% if institution_address %}
-        <p style="margin-top: 5px;"><strong>{{ institution_name|default:"Centro Universitario Santa Cecilia" }}</strong><br/>
+        <p style="margin-top: 5px;"><strong>{{ institution_name|default:"Colegio Santa Cecilia" }}</strong><br/>
         {{ institution_address }}</p>
         {% if institution_maps_url %}
         <p style="margin-top: 5px;"><a href="{{ institution_maps_url }}" style="color: #2563eb; text-decoration: none;">Ver ubicación en Google Maps</a></p>

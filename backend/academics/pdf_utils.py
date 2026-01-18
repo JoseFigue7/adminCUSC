@@ -24,21 +24,49 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
         BytesIO: Archivo PDF en memoria
     """
     try:
+        import base64
+        import os
+        from django.conf import settings
+        
         student = cuatrimestre_enrollment.student
         cuatrimestre = cuatrimestre_enrollment.cuatrimestre
         career = cuatrimestre.career
         
-        # Obtener cursos con horarios
-        course_enrollments = cuatrimestre_enrollment.course_enrollments.select_related(
-            'course'
-        ).prefetch_related('course__schedules').all()
+        # Cargar el logo en base64 para marca de agua
+        logo_base64 = None
+        try:
+            logo_path = os.path.join(settings.BASE_DIR, 'students', 'static', 'students', 'contracts', 'logo.png')
+            if os.path.exists(logo_path):
+                with open(logo_path, 'rb') as logo_file:
+                    logo_data = logo_file.read()
+                    logo_base64 = base64.b64encode(logo_data).decode('utf-8')
+                    logo_base64 = f"data:image/png;base64,{logo_base64}"
+        except Exception as logo_error:
+            logger.warning(f'Error al cargar logo: {str(logo_error)}')
         
+        # Obtener cursos con horarios
+        # Si hay pre_assign_course_ids, usar esos (antes de confirmar)
+        # Si no, usar los course_enrollments existentes (después de confirmar)
         courses_data = []
         total_credits = 0
         total_cost = Decimal('0.00')
         
-        for enrollment in course_enrollments:
-            course = enrollment.course
+        pre_assigned_ids = cuatrimestre_enrollment.pre_assign_course_ids or []
+        
+        if pre_assigned_ids:
+            # Obtener cursos desde los IDs pre-asignados (antes de confirmar)
+            from uuid import UUID
+            from .models import Course
+            course_uuids = [UUID(cid) for cid in pre_assigned_ids]
+            courses = Course.objects.filter(id__in=course_uuids).prefetch_related('schedules')
+        else:
+            # Obtener cursos desde CourseEnrollment (después de confirmar)
+            course_enrollments = cuatrimestre_enrollment.course_enrollments.select_related(
+                'course'
+            ).prefetch_related('course__schedules').all()
+            courses = [enrollment.course for enrollment in course_enrollments]
+        
+        for course in courses:
             schedules = [
                 {
                     'day': schedule.day,
@@ -79,6 +107,11 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
         }
         period_name = period_names.get(period, '')
         
+        # Formatear carrera con RVOE
+        career_display = career.name
+        if career.rvoe:
+            career_display = f"{career.name} ({career.rvoe})"
+        
         context = {
             'student': {
                 'full_name': student.get_full_name(),
@@ -86,7 +119,7 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
                 'email': student.email or 'N/A',
                 'phone': student.phone or 'N/A'
             },
-            'career': career.name,
+            'career': career_display,
             'cuatrimestre': cuatrimestre.name,
             'academic_year': cuatrimestre_enrollment.academic_year,
             'period': period_name,
@@ -95,11 +128,130 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
             'total_cost': total_cost,
             'date': date_formatted,
             'is_preview': True,  # Indica que es una boleta de preview
-            'institution_name': 'Centro Universitario Santa Cecilia',
-            'institution_acronym': 'CUSC'
+            'institution_name': 'Colegio Santa Cecilia',
+            'institution_acronym': 'CUSC',
+            'logo_base64': logo_base64
         }
         
-        # Generar HTML
+        # Generar contenido de la boleta (se duplicará)
+        watermark_img = f'<img src="{logo_base64}" alt="Logo" class="watermark-img" />' if logo_base64 else ""
+        
+        boleta_content_template = """
+            <div class="boleta-content">
+                {watermark}
+                <div class="header">
+                    <h1>{institution_name}</h1>
+                    <h2>BOLETA DE ASIGNACIÓN ACADÉMICA</h2>
+                    <p class="date-text">{date}</p>
+                </div>
+                
+                <div class="info-section">
+                    <div class="info-row">
+                        <span class="info-label">Estudiante:</span>
+                        <span>{full_name}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Carnet:</span>
+                        <span>{carnet}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Carrera:</span>
+                        <span>{career}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Cuatrimestre:</span>
+                        <span>{cuatrimestre}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Año Académico:</span>
+                        <span>{academic_year}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Período:</span>
+                        <span>{period}</span>
+                    </div>
+                </div>
+                
+                <h3 class="courses-title">Cursos Asignados</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Código</th>
+                            <th>Nombre del Curso</th>
+                            <th>Créditos</th>
+                            <th>Horarios</th>
+                            <th>Costo</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {courses_rows}
+                        <tr class="total-row">
+                            <td colspan="2"><strong>TOTAL</strong></td>
+                            <td><strong>{total_credits}</strong></td>
+                            <td></td>
+                            <td><strong>${total_cost}</strong></td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <div class="signature-section">
+                    <p class="signature-label">Firma del Estudiante</p>
+                    <div class="signature-line"></div>
+                </div>
+            </div>
+        """
+        
+        # Generar filas de cursos
+        courses_rows_html = ""
+        for course in courses_data:
+            schedules_str = ', '.join([
+                f"{s['day']} {s['start_time']}-{s['end_time']}"
+                for s in course['schedules']
+            ]) if course['schedules'] else 'Sin horario'
+            
+            courses_rows_html += f"""
+                        <tr>
+                            <td>{course['code']}</td>
+                            <td>{course['name']}</td>
+                            <td>{course['credits']}</td>
+                            <td class="schedules-cell">{schedules_str}</td>
+                            <td>${course['cost']:,.2f}</td>
+                        </tr>
+            """
+        
+        # Formatear contenido de la boleta con los datos
+        boleta_content = boleta_content_template.format(
+            watermark=watermark_img,
+            institution_name=context['institution_name'],
+            date=context['date'],
+            full_name=context['student']['full_name'],
+            carnet=context['student']['carnet'],
+            career=context['career'],
+            cuatrimestre=context['cuatrimestre'],
+            academic_year=context['academic_year'],
+            period=context['period'],
+            courses_rows=courses_rows_html,
+            total_credits=total_credits,
+            total_cost=f"{total_cost:,.2f}"
+        )
+        
+        # Estilos de marca de agua
+        watermark_style = ""
+        if logo_base64:
+            watermark_style = """
+                .watermark-img {
+                    position: absolute;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    opacity: 0.08;
+                    width: 300px;
+                    height: auto;
+                    z-index: 0;
+                    pointer-events: none;
+                }
+            """
+        
         html_string = f"""
         <!DOCTYPE html>
         <html>
@@ -109,161 +261,137 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
             <style>
                 @page {{
                     size: letter;
-                    margin: 2cm;
+                    margin: 0.7cm;
+                }}
+                * {{
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
                 }}
                 body {{
                     font-family: Arial, sans-serif;
-                    font-size: 11pt;
-                    line-height: 1.4;
+                    font-size: 8pt;
+                    line-height: 1.3;
+                    margin: 0;
+                    padding: 0;
+                    position: relative;
+                }}
+                {watermark_style}
+                .page-container {{
+                    position: relative;
+                    width: 100%;
+                    height: 26cm;
+                    overflow: hidden;
+                }}
+                .boleta-wrapper {{
+                    height: 13cm;
+                    position: relative;
+                    page-break-inside: avoid;
+                    padding: 8px;
+                    overflow: hidden;
+                }}
+                .boleta-wrapper.upper {{
+                    border-bottom: 2px dashed #ccc;
+                }}
+                .boleta-content {{
+                    position: relative;
+                    width: 100%;
+                    height: 100%;
+                    display: flex;
+                    flex-direction: column;
+                    z-index: 1;
                 }}
                 .header {{
                     text-align: center;
-                    margin-bottom: 30px;
-                    border-bottom: 2px solid #333;
-                    padding-bottom: 15px;
+                    margin-bottom: 8px;
+                    border-bottom: 1px solid #333;
+                    padding-bottom: 5px;
                 }}
                 .header h1 {{
-                    font-size: 18pt;
+                    font-size: 12pt;
                     font-weight: bold;
                     margin: 0;
+                    line-height: 1.2;
                 }}
                 .header h2 {{
-                    font-size: 14pt;
+                    font-size: 10pt;
                     font-weight: normal;
-                    margin: 5px 0;
+                    margin: 2px 0;
+                    line-height: 1.2;
+                }}
+                .date-text {{
+                    font-size: 8pt;
+                    color: #666;
+                    margin-top: 3px;
                 }}
                 .info-section {{
-                    margin-bottom: 20px;
+                    margin-bottom: 6px;
                 }}
                 .info-row {{
-                    margin-bottom: 8px;
+                    margin-bottom: 3px;
+                    font-size: 8pt;
+                    line-height: 1.2;
                 }}
                 .info-label {{
                     font-weight: bold;
                     display: inline-block;
-                    width: 150px;
+                    width: 110px;
                 }}
-                .warning-box {{
-                    background-color: #fff3cd;
-                    border: 2px solid #ffc107;
-                    padding: 15px;
-                    margin: 20px 0;
-                    border-radius: 5px;
-                }}
-                .warning-box strong {{
-                    color: #856404;
+                .courses-title {{
+                    font-size: 9pt;
+                    margin: 5px 0 3px 0;
+                    font-weight: bold;
                 }}
                 table {{
                     width: 100%;
                     border-collapse: collapse;
-                    margin: 20px 0;
+                    margin: 5px 0;
+                    font-size: 7pt;
+                    line-height: 1.2;
                 }}
                 table th {{
                     background-color: #f8f9fa;
                     border: 1px solid #dee2e6;
-                    padding: 10px;
+                    padding: 4px 5px;
                     text-align: left;
                     font-weight: bold;
+                    font-size: 7pt;
                 }}
                 table td {{
                     border: 1px solid #dee2e6;
-                    padding: 8px;
+                    padding: 3px 5px;
+                    font-size: 7pt;
+                }}
+                .schedules-cell {{
+                    font-size: 6pt;
                 }}
                 .total-row {{
                     font-weight: bold;
                     background-color: #f8f9fa;
                 }}
-                .footer {{
-                    margin-top: 30px;
+                .signature-section {{
+                    margin-top: 10px;
                     text-align: center;
-                    font-size: 9pt;
-                    color: #666;
+                }}
+                .signature-label {{
+                    font-size: 8pt;
+                    margin-bottom: 5px;
+                }}
+                .signature-line {{
+                    border-top: 1px solid #333;
+                    width: 200px;
+                    margin: 20px auto 0;
                 }}
             </style>
         </head>
         <body>
-            <div class="header">
-                <h1>{context['institution_name']}</h1>
-                <h2>BOLETA DE ASIGNACIÓN ACADÉMICA</h2>
-                <p style="font-size: 10pt; color: #666;">{context['date']}</p>
-            </div>
-            
-            <div class="warning-box">
-                <strong>⚠️ BOLETA INFORMATIVA (PREVIEW)</strong><br>
-                Esta boleta muestra la asignación propuesta de cursos. 
-                La asignación NO está confirmada hasta que se presione "Confirmar asignación".
-            </div>
-            
-            <div class="info-section">
-                <div class="info-row">
-                    <span class="info-label">Estudiante:</span>
-                    <span>{context['student']['full_name']}</span>
+            <div class="page-container">
+                <div class="boleta-wrapper upper">
+                    {boleta_content}
                 </div>
-                <div class="info-row">
-                    <span class="info-label">Carnet:</span>
-                    <span>{context['student']['carnet']}</span>
+                <div class="boleta-wrapper lower">
+                    {boleta_content}
                 </div>
-                <div class="info-row">
-                    <span class="info-label">Carrera:</span>
-                    <span>{context['career']}</span>
-                </div>
-                <div class="info-row">
-                    <span class="info-label">Cuatrimestre:</span>
-                    <span>{context['cuatrimestre']}</span>
-                </div>
-                <div class="info-row">
-                    <span class="info-label">Año Académico:</span>
-                    <span>{context['academic_year']}</span>
-                </div>
-                <div class="info-row">
-                    <span class="info-label">Período:</span>
-                    <span>{context['period']}</span>
-                </div>
-            </div>
-            
-            <h3 style="margin-top: 30px;">Cursos Asignados</h3>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Código</th>
-                        <th>Nombre del Curso</th>
-                        <th>Créditos</th>
-                        <th>Horarios</th>
-                        <th>Costo</th>
-                    </tr>
-                </thead>
-                <tbody>
-        """
-        
-        for course in courses_data:
-            schedules_str = ', '.join([
-                f"{s['day']} {s['start_time']}-{s['end_time']}"
-                for s in course['schedules']
-            ]) if course['schedules'] else 'Sin horario'
-            
-            html_string += f"""
-                    <tr>
-                        <td>{course['code']}</td>
-                        <td>{course['name']}</td>
-                        <td>{course['credits']}</td>
-                        <td>{schedules_str}</td>
-                        <td>${course['cost']:,.2f}</td>
-                    </tr>
-            """
-        
-        html_string += f"""
-                    <tr class="total-row">
-                        <td colspan="2"><strong>TOTAL</strong></td>
-                        <td><strong>{total_credits}</strong></td>
-                        <td></td>
-                        <td><strong>${total_cost:,.2f}</strong></td>
-                    </tr>
-                </tbody>
-            </table>
-            
-            <div class="footer">
-                <p>Este documento es una boleta informativa. La asignación se confirmará al presionar "Confirmar asignación".</p>
-                <p>Generado el {context['date']}</p>
             </div>
         </body>
         </html>
@@ -424,7 +552,7 @@ def generate_payment_voucher(cuatrimestre_enrollment):
         </head>
         <body>
             <div class="header">
-                <h1>Centro Universitario Santa Cecilia</h1>
+                <h1>Colegio Santa Cecilia</h1>
                 <h2>TALONARIO DE PAGOS</h2>
                 <p style="font-size: 10pt; color: #666;">{date_formatted}</p>
             </div>

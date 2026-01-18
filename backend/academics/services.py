@@ -199,15 +199,8 @@ class PreAssignCoursesService:
                 'errors': schedule_errors
             }
         
-        # Eliminar pre-asignaciones anteriores (si existen)
-        # Solo eliminar si el estado permite modificación
-        if self.cuatrimestre_enrollment.status == 'CURSOS_PREASIGNADOS':
-            CourseEnrollment.objects.filter(
-                cuatrimestre_enrollment=self.cuatrimestre_enrollment
-            ).delete()
-        
-        # Crear pre-asignaciones (CourseEnrollment con estado MATRICULADO)
-        created = []
+        # Validar cursos y guardar IDs temporalmente (NO crear CourseEnrollment todavía)
+        validated_course_ids = []
         errors = []
         
         for course in courses:
@@ -223,26 +216,28 @@ class PreAssignCoursesService:
                     errors.append(f"El curso {course.code} - {course.name} ya fue aprobado. No se puede volver a inscribir.")
                     continue
                 
-                # Crear pre-asignación
-                enrollment = CourseEnrollment.objects.create(
-                    student=self.student,
-                    course=course,
-                    cuatrimestre_enrollment=self.cuatrimestre_enrollment,
-                    status='MATRICULADO'
-                )
-                created.append(str(enrollment.id))
+                # Solo guardar el ID, NO crear CourseEnrollment
+                validated_course_ids.append(str(course.id))
             except Exception as e:
-                errors.append(f"Error al pre-asignar curso {course.code}: {str(e)}")
+                errors.append(f"Error al validar curso {course.code}: {str(e)}")
         
-        # Actualizar estado a CURSOS_PREASIGNADOS si se crearon asignaciones
-        if created:
-            self.cuatrimestre_enrollment.status = 'CURSOS_PREASIGNADOS'
-            self.cuatrimestre_enrollment.save()
+        # Si hay errores, no actualizar nada
+        if errors:
+            return {
+                'success': False,
+                'created': [],
+                'errors': errors
+            }
+        
+        # Guardar los IDs de cursos pre-asignados en el campo JSONField (NO crear CourseEnrollment)
+        self.cuatrimestre_enrollment.pre_assign_course_ids = validated_course_ids
+        self.cuatrimestre_enrollment.status = 'CURSOS_PREASIGNADOS'
+        self.cuatrimestre_enrollment.save()
         
         return {
-            'success': len(errors) == 0,
-            'created': created,
-            'errors': errors
+            'success': True,
+            'created': validated_course_ids,  # Retornar IDs en lugar de IDs de CourseEnrollment
+            'errors': []
         }
 
 
@@ -271,26 +266,73 @@ class ConfirmCourseAssignmentService:
             }
         """
         # Validar que se pueda confirmar
-        if not self.cuatrimestre_enrollment.can_confirm_assignment():
+        if self.cuatrimestre_enrollment.status != 'CURSOS_PREASIGNADOS':
             return {
                 'success': False,
                 'message': f'No se puede confirmar la asignación. Estado actual: {self.cuatrimestre_enrollment.get_status_display()}',
                 'payments_created': [],
-                'errors': ['El estado actual no permite confirmar la asignación.']
+                'errors': ['El estado debe ser CURSOS_PREASIGNADOS para confirmar.']
             }
         
-        # Validar que tenga cursos asignados
-        courses_count = self.cuatrimestre_enrollment.course_enrollments.count()
-        if courses_count == 0:
+        # Validar que tenga cursos pre-asignados
+        pre_assigned_ids = self.cuatrimestre_enrollment.pre_assign_course_ids or []
+        if len(pre_assigned_ids) == 0:
             return {
                 'success': False,
-                'message': 'No hay cursos asignados para confirmar.',
+                'message': 'No hay cursos pre-asignados para confirmar.',
                 'payments_created': [],
-                'errors': ['Debe haber al menos un curso asignado.']
+                'errors': ['Debe haber al menos un curso pre-asignado.']
             }
         
-        # Los CourseEnrollment ya están creados, solo necesitamos cambiar el estado
-        # y generar los pagos
+        # AHORA SÍ: Crear los CourseEnrollment definitivos desde los IDs pre-asignados
+        from uuid import UUID
+        created_enrollments = []
+        
+        try:
+            # Convertir IDs string a UUID
+            course_uuids = [UUID(cid) for cid in pre_assigned_ids]
+            
+            # Obtener los cursos
+            courses = Course.objects.filter(id__in=course_uuids)
+            
+            if courses.count() != len(course_uuids):
+                return {
+                    'success': False,
+                    'message': 'Algunos cursos pre-asignados no fueron encontrados.',
+                    'payments_created': [],
+                    'errors': ['Error al validar cursos pre-asignados.']
+                }
+            
+            # Crear CourseEnrollment definitivos
+            for course in courses:
+                # Validar que no esté ya aprobado
+                approved_enrollment = CourseEnrollment.objects.filter(
+                    student=self.student,
+                    course=course,
+                    status='APROBADO'
+                ).first()
+                
+                if approved_enrollment:
+                    continue  # Saltar cursos ya aprobados
+                
+                # Crear CourseEnrollment definitivo
+                enrollment = CourseEnrollment.objects.create(
+                    student=self.student,
+                    course=course,
+                    cuatrimestre_enrollment=self.cuatrimestre_enrollment,
+                    status='MATRICULADO'
+                )
+                created_enrollments.append(str(enrollment.id))
+            
+            # Limpiar los IDs pre-asignados ahora que se crearon los CourseEnrollment
+            self.cuatrimestre_enrollment.pre_assign_course_ids = []
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'Error al crear CourseEnrollment: {str(e)}',
+                'payments_created': [],
+                'errors': [str(e)]
+            }
         
         # Determinar el estado final según si está exonerado
         if self.cuatrimestre_enrollment.is_enrollment_fee_exempt:

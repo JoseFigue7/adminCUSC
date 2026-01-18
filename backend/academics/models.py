@@ -3,6 +3,7 @@ from django.core.validators import MinValueValidator, MaxValueValidator, RegexVa
 from django.core.exceptions import ValidationError
 from decimal import Decimal
 import uuid
+import json
 
 
 class Career(models.Model):
@@ -56,6 +57,13 @@ class Career(models.Model):
         verbose_name='Fecha del Acuerdo de RVOE',
         help_text='Numérico, 8 caracteres, formato aaaammdd',
         validators=[RegexValidator(regex=r'^\d{8}$', message="Debe ser formato aaaammdd (8 dígitos)")]
+    )
+    rvoe = models.CharField(
+        max_length=20,
+        blank=True,
+        null=True,
+        verbose_name='RVOE',
+        help_text='Código RVOE de la carrera (ej: 20260159)'
     )
     
     created_at = models.DateTimeField(auto_now_add=True)
@@ -483,6 +491,13 @@ class CuatrimestreEnrollment(models.Model):
         verbose_name='Exonerado de cuota de inscripción',
         help_text='Si es primera inscripción, se omite el pago de inscripción'
     )
+    # Campo temporal para almacenar IDs de cursos pre-asignados (antes de confirmar)
+    pre_assign_course_ids = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name='IDs de cursos pre-asignados',
+        help_text='Lista temporal de IDs de cursos pre-asignados (se limpia al confirmar)'
+    )
     notes = models.TextField(blank=True, verbose_name='Notas')
     
     created_at = models.DateTimeField(auto_now_add=True)
@@ -597,17 +612,19 @@ class CuatrimestreEnrollment(models.Model):
         return self.status in ['PRE_INSCRIPCION', 'CURSOS_PREASIGNADOS']
     
     def can_confirm_assignment(self):
-        """Verificar si se puede confirmar la asignación (debe estar en CURSOS_PREASIGNADOS con cursos)"""
+        """Verificar si se puede confirmar la asignación (debe estar en CURSOS_PREASIGNADOS con cursos pre-asignados)"""
+        pre_assigned_ids = self.pre_assign_course_ids or []
         return (
             self.status == 'CURSOS_PREASIGNADOS' and
-            self.course_enrollments.count() > 0
+            len(pre_assigned_ids) > 0
         )
     
     def can_preview_boleta(self):
         """Verificar si se puede generar boleta de asignación (debe tener cursos pre-asignados)"""
+        pre_assigned_ids = self.pre_assign_course_ids or []
         return (
             self.status == 'CURSOS_PREASIGNADOS' and
-            self.course_enrollments.count() > 0
+            len(pre_assigned_ids) > 0
         )
 
 
