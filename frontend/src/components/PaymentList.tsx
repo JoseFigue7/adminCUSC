@@ -260,7 +260,7 @@ const PaymentList: React.FC = () => {
     // Construir la URL completa
     const fullUrl = receiptUrl.startsWith('http') 
       ? receiptUrl 
-      : `http://localhost:8000/${receiptUrl}`;
+      : `http://localhost:8004/${receiptUrl}`;
     
     window.open(fullUrl, '_blank');
   };

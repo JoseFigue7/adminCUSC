@@ -54,6 +54,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',  # WhiteNoise para servir archivos estáticos
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -148,6 +149,9 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
+# WhiteNoise configuration para servir archivos estáticos en producción
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
 MEDIA_URL = 'media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
@@ -206,9 +210,22 @@ SIMPLE_JWT = {
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+    "http://137.184.188.234",
+    "https://137.184.188.234",
 ]
 
+# Si tienes dominio, agregarlo aquí:
+# CORS_ALLOWED_ORIGINS.append("http://tu-dominio.com")
+# CORS_ALLOWED_ORIGINS.append("https://tu-dominio.com")
+
 CORS_ALLOW_CREDENTIALS = True
+
+# Para desarrollo, permitir cualquier origen (solo si DEBUG=True)
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+    CORS_ALLOWED_ORIGINS = []  # Se ignora si ALLOW_ALL_ORIGINS=True
 
 # Django Jazzmin Configuration
 JAZZMIN_SETTINGS = {

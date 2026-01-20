@@ -176,7 +176,7 @@ const PendingTransfers: React.FC = () => {
     if (!receiptUrl) return;
     const fullUrl = receiptUrl.startsWith('http') 
       ? receiptUrl 
-      : `${process.env.REACT_APP_API_URL || 'http://localhost:8000'}/${receiptUrl}`;
+      : `${process.env.REACT_APP_API_URL || 'http://localhost:8004'}/${receiptUrl}`;
     window.open(fullUrl, '_blank');
   };
 
