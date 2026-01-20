@@ -40,7 +40,7 @@ class StudentAdmin(admin.ModelAdmin):
     list_filter = ['is_active', 'career', 'scholarship_type', 'pensum_closed', 'thesis_started', 'enrollment_date', 'gender', 'birth_country']
     search_fields = ['carnet', 'first_name', 'first_last_name', 'second_last_name', 'email', 'curp']
     readonly_fields = [
-        'id', 'carnet', 'created_at', 'updated_at', 
+        'id', 'carnet', 'enrollment_date', 'created_at', 'updated_at', 
         'student_documents_link', 'student_payments_link'
     ]
     inlines = [EnrollmentInline, StudentDocumentInline]
