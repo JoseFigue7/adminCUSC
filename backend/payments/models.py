@@ -16,9 +16,11 @@ class Payment(models.Model):
     
     STATUS_CHOICES = [
         ('PENDIENTE', 'Pendiente'),
+        ('NO_PAGADO', 'No Pagado'),
         ('EN_REVISION', 'En Revisión'),
         ('APROBADO', 'Aprobado'),
         ('RECHAZADO', 'Rechazado'),
+        ('MORA', 'Mora'),
     ]
     
     MONTHS = [
@@ -92,7 +94,7 @@ class Payment(models.Model):
     year = models.IntegerField(null=True, blank=True, verbose_name='Año')
     semester = models.IntegerField(null=True, blank=True, verbose_name='Semestre/Trimestre')
     quantity = models.IntegerField(null=True, blank=True, verbose_name='Cantidad')
-    payment_date = models.DateField(auto_now_add=True, verbose_name='Fecha de pago')
+    payment_date = models.DateField(null=True, blank=True, verbose_name='Fecha programada de pago', help_text='Fecha programada para el pago (día 1 del mes correspondiente para colegiaturas mensuales)')
     due_date = models.DateField(null=True, blank=True, verbose_name='Fecha límite de pago')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDIENTE', verbose_name='Estado')
     
@@ -272,7 +274,7 @@ class Payment(models.Model):
         if is_new_payment:
             # Aprobar automáticamente solo pagos en efectivo
             # Los pagos con tarjeta quedan pendientes hasta que el webhook los confirme
-            # Las transferencias también quedan pendientes
+            # Las transferencias pueden ser NO_PAGADO (para colegiaturas mensuales) o PENDIENTE
             if self.payment_method == 'EFECTIVO':
                 # Aprobar automáticamente pagos en efectivo
                 # Ignorar cualquier status que se haya establecido manualmente
@@ -285,22 +287,25 @@ class Payment(models.Model):
             elif self.payment_method == 'TARJETA':
                 # Los pagos con tarjeta quedan pendientes hasta que el webhook los confirme
                 # El webhook payment_intent.succeeded es la única fuente de verdad
-                self.status = 'PENDIENTE'
+                # Solo cambiar estado si no es NO_PAGADO o MORA (para respetar estados de colegiatura)
+                if self.status not in ['NO_PAGADO', 'MORA']:
+                    self.status = 'PENDIENTE'
                 # Limpiar campos de aprobación si se intentaron establecer
                 if self.approved_by:
                     self.approved_by = None
                 if self.approved_at:
                     self.approved_at = None
             elif self.payment_method == 'TRANSFERENCIA':
-                # Las transferencias siempre quedan pendientes al crear
+                # Las transferencias pueden ser NO_PAGADO (para colegiaturas mensuales) o PENDIENTE
                 # Validar que no se intente crear una transferencia ya aprobada
                 if self.status == 'APROBADO':
                     raise ValidationError(
                         'Las transferencias no pueden ser aprobadas automáticamente. '
                         'Deben quedar pendientes para confirmación manual.'
                     )
-                # Asegurar que quede pendiente (ignorar cualquier otro estado)
-                self.status = 'PENDIENTE'
+                # Solo cambiar estado si no es NO_PAGADO o MORA (para respetar estados de colegiatura)
+                if self.status not in ['NO_PAGADO', 'MORA']:
+                    self.status = 'PENDIENTE'
                 # Limpiar campos de aprobación si se intentaron establecer
                 if self.approved_by:
                     self.approved_by = None
@@ -315,6 +320,29 @@ class Payment(models.Model):
         # - final_amount: original_amount - scholarship_discount_amount + penalty_amount
         # También actualiza amount para compatibilidad con código existente
         self._calculate_amounts()
+        
+        # Evaluar automáticamente si el pago debe estar en estado MORA
+        # Solo si no está aprobado y tiene configuración de mora
+        if self.status not in ['APROBADO', 'RECHAZADO', 'EN_REVISION']:
+            if self.payment_type and self.due_date:
+                if self.payment_type.has_penalty:
+                    from datetime import date, timedelta
+                    current_date = date.today()
+                    # Calcular fecha efectiva de inicio de mora
+                    grace_period_end = self.due_date + timedelta(days=self.payment_type.penalty_days_offset)
+                    
+                    # Si la fecha actual excede los días de gracia, cambiar a MORA
+                    if current_date > grace_period_end:
+                        # Solo cambiar a MORA si está en NO_PAGADO o PENDIENTE
+                        if self.status in ['NO_PAGADO', 'PENDIENTE']:
+                            self.status = 'MORA'
+                    # Si la fecha actual no excede los días de gracia y está en MORA, volver a NO_PAGADO
+                    elif self.status == 'MORA' and current_date <= grace_period_end:
+                        self.status = 'NO_PAGADO'
+        
+        # Si payment_date no está establecido y es un nuevo pago, establecer la fecha actual
+        if is_new_payment and not self.payment_date:
+            self.payment_date = timezone.now().date()
         
         super().save(*args, **kwargs)
 

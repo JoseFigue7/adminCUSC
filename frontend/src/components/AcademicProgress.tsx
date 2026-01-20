@@ -11,7 +11,7 @@ interface Progress {
   approved_courses: number;
   progress_percentage: number;
   pensum_closed: boolean;
-  thesis_started: boolean;
+  graduation_method_started: boolean;
 }
 
 interface Enrollment {
@@ -353,11 +353,11 @@ const AcademicProgress: React.FC = () => {
                   <p>{progress.pensum_closed ? 'Cerrado' : 'En Progreso'}</p>
                 </div>
               </div>
-              <div className={`status-card ${progress.thesis_started ? 'status-active' : 'status-inactive'}`}>
+              <div className={`status-card ${progress.graduation_method_started ? 'status-active' : 'status-inactive'}`}>
                 <FiBook className="status-card-icon" />
                 <div>
-                  <h4>Tesis</h4>
-                  <p>{progress.thesis_started ? 'Iniciada' : 'No Iniciada'}</p>
+                  <h4>Método de Graduación</h4>
+                  <p>{progress.graduation_method_started ? 'Iniciado' : 'No Iniciado'}</p>
                 </div>
               </div>
             </div>

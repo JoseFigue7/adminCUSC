@@ -114,8 +114,10 @@
 
 .data-table {
   width: 100%;
+  min-width: 1200px;
   border-collapse: collapse;
   background: var(--bg-primary);
+  table-layout: auto;
 }
 
 .data-table thead {
@@ -123,7 +125,7 @@
 }
 
 .data-table th {
-  padding: 1rem 1.25rem;
+  padding: 1rem 1.5rem;
   text-align: left;
   font-weight: 700;
   color: var(--text-primary);
@@ -135,7 +137,7 @@
 }
 
 .data-table td {
-  padding: 1.25rem;
+  padding: 1.25rem 1.5rem;
   border-bottom: 1px solid var(--border-color);
   color: var(--text-primary);
 }
@@ -297,7 +299,7 @@
   }
 
   .data-table {
-    min-width: 800px;
+    min-width: 1200px;
   }
 }
 

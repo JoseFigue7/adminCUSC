@@ -44,12 +44,11 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
         except Exception as logo_error:
             logger.warning(f'Error al cargar logo: {str(logo_error)}')
         
-        # Obtener cursos con horarios
+        # Obtener cursos con horarios (solo para mostrar, no para calcular costo)
         # Si hay pre_assign_course_ids, usar esos (antes de confirmar)
         # Si no, usar los course_enrollments existentes (después de confirmar)
         courses_data = []
         total_credits = 0
-        total_cost = Decimal('0.00')
         
         pre_assigned_ids = cuatrimestre_enrollment.pre_assign_course_ids or []
         
@@ -76,15 +75,12 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
                 for schedule in course.schedules.all()
             ]
             
-            course_cost = course.cost or Decimal('0.00')
-            total_cost += course_cost
             total_credits += course.credits
             
             courses_data.append({
                 'code': course.code,
                 'name': course.name,
                 'credits': course.credits,
-                'cost': course_cost,
                 'schedules': schedules
             })
         
@@ -101,8 +97,8 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
         from .models import get_academic_period
         period = get_academic_period(cuatrimestre.number)
         period_names = {
-            1: 'Enero - Abril',
-            2: 'Mayo - Agosto',
+            1: 'Febrero - Mayo',
+            2: 'Junio - Agosto',
             3: 'Septiembre - Diciembre'
         }
         period_name = period_names.get(period, '')
@@ -125,7 +121,6 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
             'period': period_name,
             'courses': courses_data,
             'total_credits': total_credits,
-            'total_cost': total_cost,
             'date': date_formatted,
             'is_preview': True,  # Indica que es una boleta de preview
             'institution_name': 'Colegio Santa Cecilia',
@@ -180,7 +175,6 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
                             <th>Nombre del Curso</th>
                             <th>Créditos</th>
                             <th>Horarios</th>
-                            <th>Costo</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -189,7 +183,6 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
                             <td colspan="2"><strong>TOTAL</strong></td>
                             <td><strong>{total_credits}</strong></td>
                             <td></td>
-                            <td><strong>${total_cost}</strong></td>
                         </tr>
                     </tbody>
                 </table>
@@ -215,7 +208,6 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
                             <td>{course['name']}</td>
                             <td>{course['credits']}</td>
                             <td class="schedules-cell">{schedules_str}</td>
-                            <td>${course['cost']:,.2f}</td>
                         </tr>
             """
         
@@ -231,8 +223,7 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
             academic_year=context['academic_year'],
             period=context['period'],
             courses_rows=courses_rows_html,
-            total_credits=total_credits,
-            total_cost=f"{total_cost:,.2f}"
+            total_credits=total_credits
         )
         
         # Estilos de marca de agua
@@ -448,8 +439,8 @@ def generate_payment_voucher(cuatrimestre_enrollment):
         from .models import get_academic_period
         period = get_academic_period(cuatrimestre.number)
         period_names = {
-            1: 'Enero - Abril',
-            2: 'Mayo - Agosto',
+            1: 'Febrero - Mayo',
+            2: 'Junio - Agosto',
             3: 'Septiembre - Diciembre'
         }
         period_name = period_names.get(period, '')
@@ -472,6 +463,28 @@ def generate_payment_voucher(cuatrimestre_enrollment):
                 'reference': payment.payment_reference or f"PAGO-{payment.id}"
             })
         
+        # Cargar el logo en base64 para marca de agua
+        logo_base64 = None
+        try:
+            import base64
+            from pathlib import Path
+            from django.conf import settings
+            # Usar el logo desde frontend/public/SC Logo.png
+            # BASE_DIR apunta a backend/, así que necesitamos ir un nivel arriba
+            logo_path = settings.BASE_DIR.parent / 'frontend' / 'public' / 'SC Logo.png'
+            if logo_path.exists():
+                with open(logo_path, 'rb') as logo_file:
+                    logo_data = logo_file.read()
+                    logo_base64 = base64.b64encode(logo_data).decode('utf-8')
+                    logo_base64 = f"data:image/png;base64,{logo_base64}"
+        except Exception as logo_error:
+            logger.warning(f'Error al cargar logo: {str(logo_error)}')
+        
+        # Calcular total con descuento (10% de descuento si paga completo)
+        # total_amount ya es el total del cuatrimestre (suma de todos los pagos mensuales)
+        total_with_discount = total_amount * Decimal('0.90')
+        discount_amount = total_amount * Decimal('0.10')
+        
         # Generar HTML
         html_string = f"""
         <!DOCTYPE html>
@@ -488,6 +501,25 @@ def generate_payment_voucher(cuatrimestre_enrollment):
                     font-family: Arial, sans-serif;
                     font-size: 11pt;
                     line-height: 1.4;
+                    position: relative;
+                }}
+                .watermark {{
+                    position: fixed;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    opacity: 0.08;
+                    z-index: -1;
+                    width: 500px;
+                    height: 500px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }}
+                .watermark img {{
+                    width: 100%;
+                    height: 100%;
+                    object-fit: contain;
                 }}
                 .header {{
                     text-align: center;
@@ -551,6 +583,7 @@ def generate_payment_voucher(cuatrimestre_enrollment):
             </style>
         </head>
         <body>
+            {f'<div class="watermark"><img src="{logo_base64}" alt="Logo"></div>' if logo_base64 else ''}
             <div class="header">
                 <h1>Colegio Santa Cecilia</h1>
                 <h2>TALONARIO DE PAGOS</h2>
@@ -584,6 +617,25 @@ def generate_payment_voucher(cuatrimestre_enrollment):
                 </div>
             </div>
             
+            {f'''
+            <div style="margin-top: 25px; padding: 15px; background-color: #e7f3ff; border: 2px solid #2196F3; border-radius: 5px;">
+                <h4 style="margin-top: 0; color: #1565C0; font-size: 12pt;">Acceso a Plataforma</h4>
+                <div style="margin-top: 10px;">
+                    <div class="info-row" style="margin-bottom: 8px;">
+                        <span class="info-label" style="font-weight: bold; color: #1565C0;">Usuario:</span>
+                        <span style="font-family: monospace; font-size: 11pt; font-weight: bold;">{student.moodle_username or 'N/A'}</span>
+                    </div>
+                    <div class="info-row" style="margin-bottom: 0;">
+                        <span class="info-label" style="font-weight: bold; color: #1565C0;">Contraseña:</span>
+                        <span style="font-family: monospace; font-size: 11pt; font-weight: bold;">{student.moodle_password or 'N/A'}</span>
+                    </div>
+                </div>
+                <p style="margin-top: 10px; margin-bottom: 0; font-size: 9pt; color: #1565C0; font-style: italic;">
+                    Estas credenciales son para acceder a la plataforma Moodle. No son para este sistema administrativo.
+                </p>
+            </div>
+            ''' if (student.moodle_username and student.moodle_password) else ''}
+            
             <h3 style="margin-top: 30px;">Pagos Mensuales</h3>
             <table>
                 <thead>
@@ -592,7 +644,6 @@ def generate_payment_voucher(cuatrimestre_enrollment):
                         <th>Año</th>
                         <th>Fecha Límite</th>
                         <th>Monto</th>
-                        <th>Referencia</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -605,7 +656,6 @@ def generate_payment_voucher(cuatrimestre_enrollment):
                         <td>{payment_data['year']}</td>
                         <td>{payment_data['due_date']}</td>
                         <td>${payment_data['amount']:,.2f}</td>
-                        <td>{payment_data['reference']}</td>
                     </tr>
             """
         
@@ -613,10 +663,19 @@ def generate_payment_voucher(cuatrimestre_enrollment):
                     <tr class="total-row">
                         <td colspan="3"><strong>TOTAL</strong></td>
                         <td><strong>${total_amount:,.2f}</strong></td>
-                        <td></td>
                     </tr>
                 </tbody>
             </table>
+            
+            <div style="margin-top: 20px; padding: 10px; border: 1px solid #dee2e6; border-radius: 4px; background-color: #f8f9fa;">
+                <p style="margin: 0; font-size: 9pt; color: #495057; line-height: 1.5;">
+                    <strong>Descuento por Pago Completo:</strong> Si realiza el pago completo del cuatrimestre, obtendrá un 10% de descuento. 
+                    Total sin descuento: <strong>${total_amount:,.2f}</strong> | 
+                    Descuento (10%): <strong>${discount_amount:,.2f}</strong> | 
+                    <strong>Total con descuento: ${total_with_discount:,.2f}</strong>. 
+                    Para aplicar este descuento, contacte a la administración antes de realizar los pagos.
+                </p>
+            </div>
             
             <div class="footer">
                 <p>Este talonario contiene los pagos mensuales del cuatrimestre.</p>

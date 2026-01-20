@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { getStudents } from '../services/api';
-import { FiUsers, FiPlus, FiEdit, FiTrendingUp, FiCheckCircle, FiXCircle, FiUser } from '../utils/icons';
+import { FiUsers, FiPlus, FiEdit, FiTrendingUp, FiCheckCircle, FiXCircle, FiUser, FiDollarSign } from '../utils/icons';
 import Pagination from './Pagination';
 import AdvancedSearch, { FilterParams } from './AdvancedSearch';
 import './shared.css';
@@ -171,6 +171,14 @@ const StudentList: React.FC = () => {
                           title="Editar"
                         >
                           <FiEdit />
+                        </Link>
+                        <Link 
+                          to={`/students/${student.id}/accounting`} 
+                          className="btn-icon btn-icon-success"
+                          title="Ver Estado de Cuenta"
+                          style={{ color: '#10b981' }}
+                        >
+                          <FiDollarSign />
                         </Link>
                         <Link 
                           to={`/academics?studentId=${student.id}`} 

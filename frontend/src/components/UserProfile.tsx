@@ -1,10 +1,70 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { changePassword } from '../services/authApi';
-import { FiUser, FiLock, FiSave, FiLoader } from '../utils/icons';
+import { paymentsApi } from '../services/api';
+import { FiUser, FiLock, FiSave, FiLoader, FiDollarSign, FiDownload, FiEye, FiCalendar, FiCreditCard } from '../utils/icons';
 import { useToast } from '../hooks/useToast';
 import './shared.css';
 import './UserProfile.css';
+
+interface Payment {
+  id: string;
+  payment_date: string | null;
+  payment_method: string;
+  payment_method_display: string;
+  status: string;
+  status_display: string;
+  amount: number;
+  original_amount: number;
+  scholarship_discount: number;
+  penalty_amount: number;
+  month: number | null;
+  month_display: string | null;
+  year: number | null;
+  payment_type: {
+    id: string;
+    code: string;
+    name: string;
+  } | null;
+  payment_reference: string;
+  receipt_number: string;
+  transfer_receipt: string | null;
+  transaction_id: string;
+  card_last_four: string;
+}
+
+interface PendingDebt {
+  month: number;
+  month_display: string;
+  year: number;
+  amount: number;
+  base_amount: number;
+  penalty_amount: number;
+  payment_type: {
+    id: string;
+    code: string;
+    name: string;
+  };
+}
+
+interface AccountingData {
+  student: {
+    id: string;
+    carnet: string;
+    full_name: string;
+    email: string;
+  };
+  summary: {
+    total_paid: number;
+    total_debt: number;
+    balance: number;
+    total_payments: number;
+    approved_payments: number;
+    pending_payments: number;
+  };
+  pending_debts: PendingDebt[];
+  payments: Payment[];
+}
 
 const UserProfile: React.FC = () => {
   const { user } = useAuth();
@@ -17,6 +77,9 @@ const UserProfile: React.FC = () => {
   });
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [accountingData, setAccountingData] = useState<AccountingData | null>(null);
+  const [loadingAccounting, setLoadingAccounting] = useState(false);
+  const [showAccounting, setShowAccounting] = useState(false);
 
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,6 +126,51 @@ const UserProfile: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadAccounting = async () => {
+    if (accountingData) {
+      setShowAccounting(!showAccounting);
+      return;
+    }
+
+    setLoadingAccounting(true);
+    try {
+      const response = await paymentsApi.getMyAccounting();
+      setAccountingData(response.data);
+      setShowAccounting(true);
+    } catch (err: any) {
+      console.error('Error loading accounting:', err);
+      if (err.response?.status === 404) {
+        // No se encontró estudiante asociado, no mostrar error
+        setAccountingData(null);
+        setShowAccounting(false);
+      } else {
+        const errorMessage = err.response?.data?.error || 
+                            err.response?.data?.detail || 
+                            'Error al cargar la contabilidad';
+        error(errorMessage);
+      }
+    } finally {
+      setLoadingAccounting(false);
+    }
+  };
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('es-MX', {
+      style: 'currency',
+      currency: 'MXN',
+    }).format(amount);
+  };
+
+  const formatDate = (dateString: string | null) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('es-MX', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
   };
 
   if (!user) {
@@ -117,6 +225,262 @@ const UserProfile: React.FC = () => {
               </div>
             )}
           </div>
+        </div>
+      </div>
+
+      {accountingData && showAccounting && (
+        <div className="card">
+          <div className="profile-section">
+            <h3 className="section-title">Mi Contabilidad</h3>
+            
+            {/* Resumen */}
+            <div style={{ 
+              display: 'grid', 
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
+              gap: '1rem',
+              marginBottom: '2rem',
+              padding: '1rem',
+              background: 'var(--bg-secondary)',
+              borderRadius: 'var(--radius-md)'
+            }}>
+              <div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                  Total Pagado
+                </div>
+                <div style={{ fontSize: '1.5rem', fontWeight: '600', color: '#10b981' }}>
+                  {formatCurrency(accountingData.summary.total_paid)}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                  Deudas Pendientes
+                </div>
+                <div style={{ fontSize: '1.5rem', fontWeight: '600', color: '#ef4444' }}>
+                  {formatCurrency(accountingData.summary.total_debt)}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                  Balance
+                </div>
+                <div style={{ 
+                  fontSize: '1.5rem', 
+                  fontWeight: '600', 
+                  color: accountingData.summary.balance >= 0 ? '#10b981' : '#ef4444'
+                }}>
+                  {formatCurrency(accountingData.summary.balance)}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                  Pagos Totales
+                </div>
+                <div style={{ fontSize: '1.5rem', fontWeight: '600', color: 'var(--text-primary)' }}>
+                  {accountingData.summary.total_payments}
+                </div>
+              </div>
+            </div>
+
+            {/* Deudas Pendientes */}
+            {accountingData.pending_debts.length > 0 && (
+              <div style={{ marginBottom: '2rem' }}>
+                <h4 style={{ 
+                  fontSize: '1.1rem', 
+                  fontWeight: '600', 
+                  marginBottom: '1rem',
+                  color: '#ef4444'
+                }}>
+                  Deudas Pendientes
+                </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {accountingData.pending_debts.map((debt, index) => (
+                    <div 
+                      key={index}
+                      style={{
+                        padding: '1rem',
+                        background: '#fef2f2',
+                        border: '1px solid #fecaca',
+                        borderRadius: 'var(--radius-md)',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: '600', color: '#991b1b' }}>
+                          {debt.month_display} {debt.year} - {debt.payment_type.name}
+                        </div>
+                        {debt.penalty_amount > 0 && (
+                          <div style={{ fontSize: '0.85rem', color: '#dc2626', marginTop: '0.25rem' }}>
+                            Mora: {formatCurrency(debt.penalty_amount)}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#ef4444' }}>
+                        -{formatCurrency(debt.amount)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Historial de Pagos */}
+            <div>
+              <h4 style={{ 
+                fontSize: '1.1rem', 
+                fontWeight: '600', 
+                marginBottom: '1rem',
+                color: 'var(--text-primary)'
+              }}>
+                Historial de Pagos
+              </h4>
+              {accountingData.payments.length === 0 ? (
+                <div style={{ 
+                  padding: '2rem', 
+                  textAlign: 'center', 
+                  color: 'var(--text-secondary)',
+                  background: 'var(--bg-secondary)',
+                  borderRadius: 'var(--radius-md)'
+                }}>
+                  No hay pagos registrados
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {accountingData.payments.map((payment) => (
+                    <div 
+                      key={payment.id}
+                      style={{
+                        padding: '1rem',
+                        background: payment.status === 'APROBADO' ? '#f0fdf4' : 
+                                   payment.status === 'PENDIENTE' || payment.status === 'EN_REVISION' ? '#fffbeb' :
+                                   '#fef2f2',
+                        border: `1px solid ${
+                          payment.status === 'APROBADO' ? '#86efac' : 
+                          payment.status === 'PENDIENTE' || payment.status === 'EN_REVISION' ? '#fde68a' :
+                          '#fecaca'
+                        }`,
+                        borderRadius: 'var(--radius-md)'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: '600', color: 'var(--text-primary)', marginBottom: '0.25rem' }}>
+                            {payment.payment_type?.name || 'Pago sin tipo'}
+                            {payment.month_display && payment.year && (
+                              <span style={{ marginLeft: '0.5rem', color: 'var(--text-secondary)', fontWeight: '400' }}>
+                                - {payment.month_display} {payment.year}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                            <FiCalendar style={{ display: 'inline', marginRight: '0.25rem' }} />
+                            {formatDate(payment.payment_date)}
+                          </div>
+                          <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                            <FiCreditCard style={{ display: 'inline', marginRight: '0.25rem' }} />
+                            {payment.payment_method_display}
+                            {payment.card_last_four && ` •••• ${payment.card_last_four}`}
+                            {payment.payment_reference && ` • Ref: ${payment.payment_reference}`}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ 
+                            fontSize: '1.25rem', 
+                            fontWeight: '600', 
+                            color: payment.status === 'APROBADO' ? '#10b981' : 'var(--text-primary)'
+                          }}>
+                            {payment.status === 'APROBADO' ? '+' : ''}{formatCurrency(payment.amount)}
+                          </div>
+                          <div style={{ 
+                            fontSize: '0.75rem', 
+                            padding: '0.25rem 0.5rem',
+                            borderRadius: 'var(--radius-sm)',
+                            display: 'inline-block',
+                            marginTop: '0.5rem',
+                            background: payment.status === 'APROBADO' ? '#d1fae5' :
+                                       payment.status === 'PENDIENTE' || payment.status === 'EN_REVISION' ? '#fef3c7' :
+                                       '#fee2e2',
+                            color: payment.status === 'APROBADO' ? '#065f46' :
+                                   payment.status === 'PENDIENTE' || payment.status === 'EN_REVISION' ? '#92400e' :
+                                   '#991b1b'
+                          }}>
+                            {payment.status_display}
+                          </div>
+                        </div>
+                      </div>
+                      {payment.transfer_receipt && (
+                        <div style={{ marginTop: '0.5rem' }}>
+                          <a 
+                            href={payment.transfer_receipt} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                              fontSize: '0.85rem',
+                              color: 'var(--primary-color)',
+                              textDecoration: 'none'
+                            }}
+                          >
+                            <FiEye /> Ver comprobante
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        <div className="profile-section">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+            <h3 className="section-title" style={{ marginBottom: 0 }}>Mi Contabilidad</h3>
+            <button
+              onClick={loadAccounting}
+              disabled={loadingAccounting}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.5rem 1rem',
+                background: 'var(--primary-color)',
+                color: 'white',
+                border: 'none',
+                borderRadius: 'var(--radius-md)',
+                cursor: loadingAccounting ? 'not-allowed' : 'pointer',
+                fontSize: '0.9rem',
+                fontWeight: '500',
+                opacity: loadingAccounting ? 0.6 : 1
+              }}
+            >
+              {loadingAccounting ? (
+                <>
+                  <FiLoader className="spinning" /> Cargando...
+                </>
+              ) : (
+                <>
+                  <FiDollarSign /> {showAccounting ? 'Ocultar' : 'Ver'} Contabilidad
+                </>
+              )}
+            </button>
+          </div>
+          {!showAccounting && !accountingData && (
+            <div style={{ 
+              padding: '2rem', 
+              textAlign: 'center', 
+              color: 'var(--text-secondary)',
+              background: 'var(--bg-secondary)',
+              borderRadius: 'var(--radius-md)'
+            }}>
+              Haz clic en "Ver Contabilidad" para ver tu historial de pagos y deudas
+            </div>
+          )}
         </div>
       </div>
 

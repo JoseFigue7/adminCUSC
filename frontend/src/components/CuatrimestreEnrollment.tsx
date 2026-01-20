@@ -442,20 +442,12 @@ const CuatrimestreEnrollment: React.FC = () => {
                       </>
                     )}
                     {enrollment.status === 'EN_CURSO' && (
-                      <>
-                        <button
-                          onClick={() => handleViewCourses(enrollment.id)}
-                          className="btn btn-primary btn-sm"
-                        >
-                          <FiCheckCircle /> Ver Cursos
-                        </button>
-                        <button
-                          onClick={() => handleEdit(enrollment)}
-                          className="btn btn-secondary btn-sm"
-                        >
-                          <FiEdit /> Editar
-                        </button>
-                      </>
+                      <button
+                        onClick={() => handleViewCourses(enrollment.id)}
+                        className="btn btn-primary btn-sm"
+                      >
+                        <FiCheckCircle /> Ver Cursos
+                      </button>
                     )}
                     {(enrollment.status === 'FINALIZADO' || enrollment.status === 'CANCELADO') && (
                       <button

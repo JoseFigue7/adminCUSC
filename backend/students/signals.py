@@ -3,7 +3,11 @@ Señales para rastrear cambios de estado en modelos de estudiantes
 """
 from django.db.models.signals import pre_save, post_save
 from django.dispatch import receiver
-from .models import Enrollment, StudentDocument, EnrollmentStatusHistory, StudentDocumentStatusHistory
+from .models import (
+    Student, Enrollment, StudentDocument, 
+    EnrollmentStatusHistory, StudentDocumentStatusHistory,
+    generate_moodle_username, generate_moodle_password
+)
 
 
 @receiver(pre_save, sender=Enrollment)
@@ -97,3 +101,28 @@ def save_student_document_status_history(sender, instance, created, **kwargs):
                 changed_by=getattr(instance, '_changed_by_user', None),
                 comment=getattr(instance, '_status_change_notes', '')
             )
+
+
+@receiver(post_save, sender=Student)
+def generate_moodle_credentials(sender, instance, created, **kwargs):
+    """
+    Genera automáticamente el usuario y contraseña de Moodle cuando se crea un estudiante.
+    Solo se genera si no existen ya (para no sobrescribir si se crean manualmente).
+    """
+    if created and not instance.moodle_username:
+        # Generar usuario de Moodle
+        username = generate_moodle_username(
+            instance.first_name,
+            instance.first_last_name,
+            instance.second_last_name
+        )
+        
+        # Generar contraseña de Moodle
+        password = generate_moodle_password()
+        
+        # Actualizar el estudiante con las credenciales
+        # Usar update para evitar recursión en el signal
+        Student.objects.filter(pk=instance.pk).update(
+            moodle_username=username,
+            moodle_password=password
+        )

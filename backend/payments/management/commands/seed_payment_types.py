@@ -42,10 +42,10 @@ class Command(BaseCommand):
                 'requires_quantity': False,
             },
             {
-                'code': '201',
-                'name': 'Colegiatura cursos',
-                'description': 'Pago de colegiatura por cursos',
-                'amount': None,
+                'code': '102',
+                'name': 'Colegiatura de Cursos',
+                'description': 'Pago mensual base de colegiatura por cursos',
+                'amount': None,  # Se configura por carrera en PaymentConfiguration
                 'requires_career': False,
                 'requires_semester': False,
                 'requires_month': True,

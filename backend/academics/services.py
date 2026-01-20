@@ -253,9 +253,12 @@ class ConfirmCourseAssignmentService:
         self.student = cuatrimestre_enrollment.student
     
     @transaction.atomic
-    def confirm_assignment(self):
+    def confirm_assignment(self, payment_option='monthly'):
         """
         Confirmar la asignación de cursos y generar pagos.
+        
+        Args:
+            payment_option: 'monthly' para pagos mensuales o 'full' para pago completo
         
         Returns:
             dict: {
@@ -266,66 +269,120 @@ class ConfirmCourseAssignmentService:
             }
         """
         # Validar que se pueda confirmar
-        if self.cuatrimestre_enrollment.status != 'CURSOS_PREASIGNADOS':
+        # Permitir confirmar si:
+        # 1. Estado es CURSOS_PREASIGNADOS (flujo normal)
+        # 2. Estado es PENDIENTE_PAGO pero no hay pagos generados (confirmación incompleta anterior)
+        from payments.models import Payment, PaymentType
+        
+        can_confirm = False
+        if self.cuatrimestre_enrollment.status == 'CURSOS_PREASIGNADOS':
+            can_confirm = True
+        elif self.cuatrimestre_enrollment.status == 'PENDIENTE_PAGO':
+            # Verificar si ya hay pagos de colegiatura generados
+            try:
+                tuition_payment_type = PaymentType.objects.get(code='201')
+                existing_payments = Payment.objects.filter(
+                    cuatrimestre_enrollment=self.cuatrimestre_enrollment,
+                    payment_type=tuition_payment_type
+                )
+                # Si no hay pagos, permitir confirmar (confirmación incompleta)
+                if not existing_payments.exists():
+                    can_confirm = True
+            except PaymentType.DoesNotExist:
+                # Si no existe el tipo de pago, permitir confirmar
+                can_confirm = True
+        
+        if not can_confirm:
             return {
                 'success': False,
                 'message': f'No se puede confirmar la asignación. Estado actual: {self.cuatrimestre_enrollment.get_status_display()}',
                 'payments_created': [],
-                'errors': ['El estado debe ser CURSOS_PREASIGNADOS para confirmar.']
+                'errors': ['El estado debe ser CURSOS_PREASIGNADOS para confirmar, o PENDIENTE_PAGO sin pagos generados.']
             }
         
-        # Validar que tenga cursos pre-asignados
+        # Validar que tenga cursos para confirmar
+        # Puede venir de dos flujos:
+        # 1. Nuevo flujo: cursos en pre_assign_course_ids (aún no creados como CourseEnrollment)
+        # 2. Flujo antiguo: CourseEnrollment ya creados pero estado aún en CURSOS_PREASIGNADOS
         pre_assigned_ids = self.cuatrimestre_enrollment.pre_assign_course_ids or []
-        if len(pre_assigned_ids) == 0:
+        existing_enrollments = self.cuatrimestre_enrollment.course_enrollments.filter(
+            status__in=['MATRICULADO', 'CURSOS_PREASIGNADOS']
+        )
+        
+        # Si no hay cursos pre-asignados NI enrollments existentes, error
+        if len(pre_assigned_ids) == 0 and existing_enrollments.count() == 0:
             return {
                 'success': False,
-                'message': 'No hay cursos pre-asignados para confirmar.',
+                'message': 'No hay cursos asignados para confirmar.',
                 'payments_created': [],
-                'errors': ['Debe haber al menos un curso pre-asignado.']
+                'errors': ['Debe haber al menos un curso asignado antes de confirmar.']
             }
         
-        # AHORA SÍ: Crear los CourseEnrollment definitivos desde los IDs pre-asignados
+        # AHORA SÍ: Crear los CourseEnrollment definitivos desde los IDs pre-asignados (si existen)
         from uuid import UUID
         created_enrollments = []
         
         try:
-            # Convertir IDs string a UUID
-            course_uuids = [UUID(cid) for cid in pre_assigned_ids]
-            
-            # Obtener los cursos
-            courses = Course.objects.filter(id__in=course_uuids)
-            
-            if courses.count() != len(course_uuids):
-                return {
-                    'success': False,
-                    'message': 'Algunos cursos pre-asignados no fueron encontrados.',
-                    'payments_created': [],
-                    'errors': ['Error al validar cursos pre-asignados.']
-                }
-            
-            # Crear CourseEnrollment definitivos
-            for course in courses:
-                # Validar que no esté ya aprobado
-                approved_enrollment = CourseEnrollment.objects.filter(
-                    student=self.student,
-                    course=course,
-                    status='APROBADO'
-                ).first()
+            # Si hay cursos en pre_assign_course_ids, crear CourseEnrollment desde esos IDs
+            if len(pre_assigned_ids) > 0:
+                # Convertir IDs string a UUID
+                course_uuids = [UUID(cid) for cid in pre_assigned_ids]
                 
-                if approved_enrollment:
-                    continue  # Saltar cursos ya aprobados
+                # Obtener los cursos
+                courses = Course.objects.filter(id__in=course_uuids)
                 
-                # Crear CourseEnrollment definitivo
-                enrollment = CourseEnrollment.objects.create(
-                    student=self.student,
-                    course=course,
-                    cuatrimestre_enrollment=self.cuatrimestre_enrollment,
-                    status='MATRICULADO'
-                )
-                created_enrollments.append(str(enrollment.id))
-            
-            # Limpiar los IDs pre-asignados ahora que se crearon los CourseEnrollment
-            self.cuatrimestre_enrollment.pre_assign_course_ids = []
+                if courses.count() != len(course_uuids):
+                    return {
+                        'success': False,
+                        'message': 'Algunos cursos pre-asignados no fueron encontrados.',
+                        'payments_created': [],
+                        'errors': ['Error al validar cursos pre-asignados.']
+                    }
+                
+                # Crear CourseEnrollment definitivos
+                for course in courses:
+                    # Validar que no esté ya aprobado
+                    approved_enrollment = CourseEnrollment.objects.filter(
+                        student=self.student,
+                        course=course,
+                        status='APROBADO'
+                    ).first()
+                    
+                    if approved_enrollment:
+                        continue  # Saltar cursos ya aprobados
+                    
+                    # Verificar si ya existe un CourseEnrollment para este curso en este cuatrimestre
+                    existing = CourseEnrollment.objects.filter(
+                        student=self.student,
+                        course=course,
+                        cuatrimestre_enrollment=self.cuatrimestre_enrollment
+                    ).first()
+                    
+                    if existing:
+                        # Si ya existe, solo asegurarse de que esté en estado MATRICULADO
+                        if existing.status != 'MATRICULADO':
+                            existing.status = 'MATRICULADO'
+                            existing.save()
+                        created_enrollments.append(str(existing.id))
+                    else:
+                        # Crear nuevo CourseEnrollment definitivo
+                        enrollment = CourseEnrollment.objects.create(
+                            student=self.student,
+                            course=course,
+                            cuatrimestre_enrollment=self.cuatrimestre_enrollment,
+                            status='MATRICULADO'
+                        )
+                        created_enrollments.append(str(enrollment.id))
+                
+                # Limpiar los IDs pre-asignados ahora que se crearon los CourseEnrollment
+                self.cuatrimestre_enrollment.pre_assign_course_ids = []
+            else:
+                # Flujo antiguo: los CourseEnrollment ya existen, solo asegurarse de que estén en MATRICULADO
+                for enrollment in existing_enrollments:
+                    if enrollment.status != 'MATRICULADO':
+                        enrollment.status = 'MATRICULADO'
+                        enrollment.save()
+                    created_enrollments.append(str(enrollment.id))
         except Exception as e:
             return {
                 'success': False,
@@ -334,47 +391,88 @@ class ConfirmCourseAssignmentService:
                 'errors': [str(e)]
             }
         
-        # Determinar el estado final según si está exonerado
-        if self.cuatrimestre_enrollment.is_enrollment_fee_exempt:
-            # Si está exonerado, pasar directamente a EN_CURSO
-            new_status = 'EN_CURSO'
-        else:
-            # Si no está exonerado, pasar a PENDIENTE_PAGO
-            new_status = 'PENDIENTE_PAGO'
+        # Determinar el estado final - siempre pasar a EN_CURSO después de confirmar
+        # La asignación queda finalizada y no se puede modificar
+        new_status = 'EN_CURSO'
         
-        # Cambiar estado usando el manager si es EN_CURSO
-        if new_status == 'EN_CURSO':
-            CuatrimestreEnrollment.objects.update_to_en_curso(self.cuatrimestre_enrollment)
-        else:
-            self.cuatrimestre_enrollment.status = new_status
-            self.cuatrimestre_enrollment.save()
+        # Cambiar estado usando el manager (valida que no haya otra inscripción EN_CURSO)
+        CuatrimestreEnrollment.objects.update_to_en_curso(self.cuatrimestre_enrollment)
         
-        # Generar pagos mensuales
-        payments_created = self._generate_monthly_payments()
+        # Generar pagos según la opción seleccionada
+        if payment_option == 'full':
+            payments_created = self._generate_full_payment()
+        else:
+            payments_created = self._generate_monthly_payments()
+        
+        # Refrescar el objeto desde la BD para asegurar que los cambios estén disponibles
+        self.cuatrimestre_enrollment.refresh_from_db()
+        
+        # Verificar si se crearon pagos
+        if len(payments_created) == 0:
+            # Calcular si los cursos tienen costo
+            total_tuition = Decimal('0.00')
+            for enrollment in self.cuatrimestre_enrollment.course_enrollments.select_related('course').all():
+                total_tuition += enrollment.course.cost or Decimal('0.00')
+            
+            if total_tuition == 0:
+                payment_message = 'Los cursos asignados no tienen costo asignado. No se generaron pagos.'
+            else:
+                payment_message = 'No se pudieron generar los pagos. Contacte al administrador.'
+        else:
+            payment_message = 'Pagos mensuales generados.' if payment_option == 'monthly' else 'Pago completo con descuento generado.'
         
         return {
             'success': True,
-            'message': 'Asignación confirmada exitosamente. Pagos mensuales generados.',
+            'message': f'Asignación confirmada exitosamente. {payment_message}',
             'payments_created': payments_created,
-            'errors': []
+            'errors': [],
+            'no_payments_reason': 'no_cost' if len(payments_created) == 0 else None
         }
     
     def _generate_monthly_payments(self):
         """
         Generar pagos mensuales del cuatrimestre.
+        El pago mensual = Monto base del tipo 102 (PaymentType) + adicionales de cursos (course.cost)
         
         Returns:
             list: Lista de IDs de pagos creados
         """
-        from payments.models import Payment, PaymentType, PaymentConfiguration
+        from payments.models import Payment, PaymentType
         from datetime import datetime
         
-        # Calcular colegiatura total
-        total_tuition = Decimal('0.00')
-        for enrollment in self.cuatrimestre_enrollment.course_enrollments.select_related('course').all():
-            total_tuition += enrollment.course.cost or Decimal('0.00')
+        # Obtener carrera del estudiante
+        career = self.cuatrimestre_enrollment.cuatrimestre.career
         
-        if total_tuition == 0:
+        # Obtener monto base mensual del tipo de pago 102 (Colegiatura de Cursos)
+        try:
+            tuition_payment_type = PaymentType.objects.get(code='102', is_active=True)
+            base_monthly_amount = tuition_payment_type.amount or Decimal('0.00')
+            if base_monthly_amount == 0:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning('Tipo de pago 102 (Colegiatura de Cursos) no tiene monto configurado. No se generan pagos.')
+                return []
+        except PaymentType.DoesNotExist:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error('Tipo de pago 102 (Colegiatura de Cursos) no encontrado. Ejecute el comando seed_payment_types.')
+            return []
+        
+        # Calcular adicionales de cursos (course.cost ahora son adicionales, no el costo total)
+        course_additionals = Decimal('0.00')
+        course_enrollments = self.cuatrimestre_enrollment.course_enrollments.select_related('course').all()
+        
+        for enrollment in course_enrollments:
+            course_additional = enrollment.course.cost or Decimal('0.00')
+            course_additionals += course_additional
+        
+        # Pago mensual total = base + adicionales
+        monthly_amount = base_monthly_amount + course_additionals
+        
+        if monthly_amount == 0:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f'No se generan pagos para cuatrimestre_enrollment {self.cuatrimestre_enrollment.id}: el monto mensual es cero')
             return []
         
         # Obtener período académico
@@ -389,28 +487,39 @@ class ConfirmCourseAssignmentService:
         except AcademicPeriodConfig.DoesNotExist:
             # Fallback a meses por defecto
             period_months = {
-                1: [1, 2, 3, 4],
-                2: [5, 6, 7, 8],
-                3: [9, 10, 11, 12]
+                1: [2, 3, 4, 5],  # Febrero-Mayo
+                2: [6, 7, 8],  # Junio-Agosto
+                3: [9, 10, 11, 12]  # Septiembre-Diciembre
             }
-            months = period_months.get(period, [1, 2, 3, 4])
+            months = period_months.get(period, [2, 3, 4, 5])
         
-        # Obtener o crear tipo de pago de colegiatura
-        tuition_payment_type, _ = PaymentType.objects.get_or_create(
-            code='201',
-            defaults={
-                'name': 'Colegiatura Cursos',
-                'description': 'Pago de colegiatura por cursos',
-                'is_active': True
-            }
+        # Obtener tipo de pago de colegiatura (código 102)
+        try:
+            tuition_payment_type = PaymentType.objects.get(code='102')
+        except PaymentType.DoesNotExist:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error('Tipo de pago 102 (Colegiatura de Cursos) no encontrado. Ejecute el comando seed_payment_types.')
+            return []
+        
+        # Verificar si ya existen pagos para este cuatrimestre enrollment
+        existing_payments = Payment.objects.filter(
+            cuatrimestre_enrollment=self.cuatrimestre_enrollment,
+            payment_type=tuition_payment_type
         )
         
-        # Generar pagos mensuales (4 pagos)
-        monthly_amount = total_tuition / 4
+        # Si ya existen pagos, no crear duplicados
+        if existing_payments.exists():
+            return [str(p.id) for p in existing_payments]
+        
+        # Generar pagos mensuales (uno por cada mes del período)
         current_year = self.cuatrimestre_enrollment.academic_year
         payments_created = []
         
-        for month in months[:4]:  # Solo los primeros 4 meses del período
+        for month in months:  # Generar un pago por cada mes del período
+            # Establecer fecha programada de pago al día 1 del mes correspondiente
+            payment_date = datetime(current_year, month, 1).date()
+            
             # Obtener fecha límite de pago
             try:
                 due_date_config = MonthlyPaymentDueDate.objects.get(month=month, is_active=True)
@@ -428,7 +537,7 @@ class ConfirmCourseAssignmentService:
                 else:
                     due_date = datetime(current_year, month, due_day).date()
             
-            # Crear pago
+            # Crear pago con estado inicial NO_PAGADO y fecha programada al día 1
             payment = Payment.objects.create(
                 student=self.student,
                 payment_type=tuition_payment_type,
@@ -436,11 +545,128 @@ class ConfirmCourseAssignmentService:
                 original_amount=monthly_amount,
                 month=month,
                 year=current_year,
+                payment_date=payment_date,  # Fecha programada: día 1 del mes
                 due_date=due_date,
-                status='PENDIENTE',
+                status='NO_PAGADO',  # Estado inicial: NO_PAGADO
                 cuatrimestre_enrollment=self.cuatrimestre_enrollment,
                 notes=f'Colegiatura mensual - {dict(Payment.MONTHS)[month]} {current_year}'
             )
             payments_created.append(str(payment.id))
         
         return payments_created
+    
+    def _generate_full_payment(self):
+        """
+        Generar un solo pago completo con 10% de descuento.
+        
+        Returns:
+            list: Lista con un solo ID de pago creado
+        """
+        from payments.models import Payment, PaymentType
+        from datetime import datetime
+        
+        # Obtener carrera del estudiante
+        career = self.cuatrimestre_enrollment.cuatrimestre.career
+        
+        # Obtener monto base mensual del tipo de pago 102 (Colegiatura de Cursos)
+        try:
+            tuition_payment_type = PaymentType.objects.get(code='102', is_active=True)
+            base_monthly_amount = tuition_payment_type.amount or Decimal('0.00')
+            if base_monthly_amount == 0:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning('Tipo de pago 102 (Colegiatura de Cursos) no tiene monto configurado. No se genera pago.')
+                return None
+        except PaymentType.DoesNotExist:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error('Tipo de pago 102 (Colegiatura de Cursos) no encontrado. Ejecute el comando seed_payment_types.')
+            return None
+        
+        # Calcular adicionales de cursos (course.cost ahora son adicionales, no el costo total)
+        course_additionals = Decimal('0.00')
+        course_enrollments = self.cuatrimestre_enrollment.course_enrollments.select_related('course').all()
+        
+        for enrollment in course_enrollments:
+            course_additional = enrollment.course.cost or Decimal('0.00')
+            course_additionals += course_additional
+        
+        # Pago mensual total = base + adicionales
+        monthly_amount = base_monthly_amount + course_additionals
+        
+        if monthly_amount == 0:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f'No se generan pagos para cuatrimestre_enrollment {self.cuatrimestre_enrollment.id}: el monto mensual es cero')
+            return []
+        
+        # Obtener período académico para determinar fecha límite
+        period = get_academic_period(self.cuatrimestre_enrollment.cuatrimestre.number)
+        if not period:
+            return []
+        
+        # Obtener meses del período para determinar fecha límite (usar el primer mes)
+        try:
+            period_config = AcademicPeriodConfig.objects.get(period=period, is_active=True)
+            months = period_config.get_months()
+        except AcademicPeriodConfig.DoesNotExist:
+            period_months = {
+                1: [2, 3, 4, 5],  # Febrero-Mayo
+                2: [6, 7, 8],  # Junio-Agosto
+                3: [9, 10, 11, 12]  # Septiembre-Diciembre
+            }
+            months = period_months.get(period, [2, 3, 4, 5])
+        
+        # Verificar si ya existen pagos para este cuatrimestre enrollment
+        existing_payments = Payment.objects.filter(
+            cuatrimestre_enrollment=self.cuatrimestre_enrollment,
+            payment_type=tuition_payment_type
+        )
+        
+        # Si ya existen pagos, no crear duplicados
+        if existing_payments.exists():
+            return [str(p.id) for p in existing_payments]
+        
+        # Calcular monto con descuento (10% de descuento)
+        # Total del cuatrimestre = pago_mensual * número_de_meses
+        total_cuatrimestre = monthly_amount * len(months)
+        discounted_amount = total_cuatrimestre * Decimal('0.90')
+        current_year = self.cuatrimestre_enrollment.academic_year
+        first_month = months[0] if months else 1
+        
+        # Obtener fecha límite de pago
+        try:
+            due_date_config = MonthlyPaymentDueDate.objects.get(month=first_month, is_active=True)
+            due_day = due_date_config.due_day
+        except MonthlyPaymentDueDate.DoesNotExist:
+            due_day = 10  # Valor por defecto
+        
+        # Calcular fecha límite
+        try:
+            due_date = datetime(current_year, first_month, due_day).date()
+        except ValueError:
+            if first_month == 2:
+                due_date = datetime(current_year, first_month, 28).date()
+            else:
+                due_date = datetime(current_year, first_month, due_day).date()
+        
+        # Establecer fecha programada de pago al día 1 del primer mes del período
+        payment_date = datetime(current_year, first_month, 1).date()
+        
+        # Crear pago completo
+        payment = Payment.objects.create(
+            student=self.student,
+            payment_type=tuition_payment_type,
+            payment_method='TRANSFERENCIA',  # Por defecto, se puede cambiar
+            original_amount=discounted_amount,
+            month=first_month,
+            year=current_year,
+            payment_date=payment_date,  # Fecha programada: día 1 del primer mes
+            due_date=due_date,
+            status='NO_PAGADO',  # Estado inicial: NO_PAGADO
+            cuatrimestre_enrollment=self.cuatrimestre_enrollment,
+            notes=f'Pago completo de colegiatura con 10% descuento. Monto original: {total_cuatrimestre}, Descuento: {total_cuatrimestre * Decimal("0.10")}, Pago mensual base: {base_monthly_amount}, Adicionales cursos: {course_additionals}'
+        )
+        
+        return [str(payment.id)]
+    

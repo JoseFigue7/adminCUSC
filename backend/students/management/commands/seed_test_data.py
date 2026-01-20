@@ -13,7 +13,7 @@ from PIL import Image
 import os
 
 from students.models import Student, Enrollment, StudentDocument
-from academics.models import Career, Course, CourseEnrollment, Thesis
+from academics.models import Career, Course, CourseEnrollment, GraduationMethod
 from payments.models import Payment, Scholarship, PaymentConfiguration
 from students.utils import generate_carnet_number
 
@@ -44,7 +44,7 @@ class Command(BaseCommand):
             Payment.objects.all().delete()
             Scholarship.objects.all().delete()
             CourseEnrollment.objects.all().delete()
-            Thesis.objects.all().delete()
+            GraduationMethod.objects.all().delete()
             self.stdout.write(self.style.SUCCESS('Datos eliminados'))
 
         # Verificar que existan carreras
@@ -109,7 +109,7 @@ class Command(BaseCommand):
                 has_scholarship=random.choice([True, False, False, False]),  # 25% con beca
                 scholarship_type=random.choice(['NINGUNA', 'MEDIA', 'COMPLETA']) if random.random() < 0.25 else 'NINGUNA',
                 pensum_closed=random.choice([True, False, False, False, False]),  # 20% con pensum cerrado
-                thesis_started=random.choice([True, False, False, False, False, False])  # 16% con tesis iniciada
+                graduation_method_started=random.choice([True, False, False, False, False, False])  # 16% con método de graduación iniciado
             )
             
             # Generar carnet
@@ -139,9 +139,9 @@ class Command(BaseCommand):
             if student.has_scholarship:
                 self.create_scholarship(student)
             
-            # Crear tesis si corresponde
-            if student.thesis_started:
-                self.create_thesis(student)
+            # Crear método de graduación si corresponde
+            if student.graduation_method_started:
+                self.create_graduation_method(student)
 
         self.stdout.write(self.style.SUCCESS(f'✓ {len(students_created)} estudiantes creados exitosamente'))
         self.stdout.write(self.style.SUCCESS('✓ Documentos creados con archivos de prueba'))
@@ -165,16 +165,10 @@ class Command(BaseCommand):
         """Crear documentos del estudiante con archivos de prueba"""
         document_types = [
             'BACHILLERATO_ORIGINAL',
-            'BACHILLERATO_COPIA1',
-            'BACHILLERATO_COPIA2',
             'NACIMIENTO_ORIGINAL',
-            'NACIMIENTO_COPIA1',
-            'NACIMIENTO_COPIA2',
             'CURP',
             'MEDICO',
             'FOTO_DIGITAL',
-            'FOTO_FISICA1',
-            'FOTO_FISICA2',
             'DOMICILIO',
         ]
         
@@ -332,8 +326,11 @@ class Command(BaseCommand):
             notes='Beca de prueba generada automáticamente'
         )
 
-    def create_thesis(self, student):
-        """Crear tesis para el estudiante"""
+    def create_graduation_method(self, student):
+        """Crear método de graduación para el estudiante"""
+        method_types = ['EXAMEN_PROFESIONAL', 'TESINA', 'TESIS', 'DIPLOMADO']
+        method_type = random.choice(method_types)
+        
         statuses = [
             'REVISION_TEMA',
             'APROBACION_TEMA',
@@ -347,12 +344,20 @@ class Command(BaseCommand):
         status_weights = [0.3, 0.25, 0.2, 0.1, 0.08, 0.07]
         status = random.choices(statuses, weights=status_weights)[0]
         
-        Thesis.objects.create(
+        title_prefix = {
+            'EXAMEN_PROFESIONAL': 'Preparación para Examen Profesional',
+            'TESINA': 'Tesina de Prueba',
+            'TESIS': 'Tesis de Prueba',
+            'DIPLOMADO': 'Diplomado de Prueba'
+        }
+        
+        GraduationMethod.objects.create(
             student=student,
-            title=f'Tesis de Prueba: {random.choice(["Análisis", "Estudio", "Investigación", "Propuesta"])} sobre {random.choice(["Educación", "Derecho", "Administración", "Criminología"])}',
+            method_type=method_type,
+            title=f'{title_prefix[method_type]}: {random.choice(["Análisis", "Estudio", "Investigación", "Propuesta"])} sobre {random.choice(["Educación", "Derecho", "Administración", "Criminología"])}',
             advisor=f'Dr. {random.choice(["García", "Rodríguez", "López", "Martínez"])}',
             status=status,
             start_date=datetime.now().date() - timedelta(days=random.randint(60, 365)),
-            notes='Tesis de prueba generada automáticamente'
+            notes='Método de graduación de prueba generado automáticamente'
         )
 

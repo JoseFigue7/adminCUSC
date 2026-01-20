@@ -14,13 +14,14 @@ import AcademicProgress from './components/AcademicProgress';
 import CourseEnrollment from './components/CourseEnrollment';
 import CuatrimestreEnrollment from './components/CuatrimestreEnrollment';
 import CareerPensum from './components/CareerPensum';
-import ThesisManagement from './components/ThesisManagement';
+import GraduationMethodManagement from './components/GraduationMethodManagement';
 import GradeUpload from './components/GradeUpload';
 import ScholarshipManagement from './components/ScholarshipManagement';
 import Reports from './components/Reports';
 import Login from './components/Login';
 import Register from './components/Register';
 import UserProfile from './components/UserProfile';
+import StudentAccounting from './components/StudentAccounting';
 import PublicPayment from './components/PublicPayment';
 import ProtectedRoute from './components/ProtectedRoute';
 import Toast from './components/Toast';
@@ -164,6 +165,7 @@ function AppContent() {
             <Route path="/enrollments/:id/edit" element={<ProtectedRoute requirePermission="manage_students"><EnrollmentForm /></ProtectedRoute>} />
             <Route path="/enrollments/:id/contract" element={<ProtectedRoute requirePermission="manage_students"><ContractManagement /></ProtectedRoute>} />
             <Route path="/students/:id" element={<ProtectedRoute requirePermission="manage_students"><StudentDetail /></ProtectedRoute>} />
+            <Route path="/students/:id/accounting" element={<ProtectedRoute requirePermission="manage_payments"><StudentAccounting /></ProtectedRoute>} />
             <Route path="/payments" element={<ProtectedRoute requirePermission="manage_payments"><PaymentList /></ProtectedRoute>} />
             <Route path="/payments/pending-transfers" element={<ProtectedRoute requirePermission="manage_payments"><PendingTransfers /></ProtectedRoute>} />
             <Route path="/payments/new" element={<ProtectedRoute requirePermission="manage_payments"><PaymentForm /></ProtectedRoute>} />
@@ -172,7 +174,7 @@ function AppContent() {
             <Route path="/cuatrimestre-enrollments" element={<ProtectedRoute requirePermission="manage_academics"><CuatrimestreEnrollment /></ProtectedRoute>} />
             <Route path="/grades/upload" element={<ProtectedRoute requirePermission="manage_academics"><GradeUpload /></ProtectedRoute>} />
             <Route path="/careers/:id/pensum" element={<ProtectedRoute requirePermission="manage_academics"><CareerPensum /></ProtectedRoute>} />
-            <Route path="/thesis" element={<ProtectedRoute requirePermission="manage_thesis"><ThesisManagement /></ProtectedRoute>} />
+            <Route path="/graduation-method" element={<ProtectedRoute requirePermission="manage_thesis"><GraduationMethodManagement /></ProtectedRoute>} />
             <Route path="/scholarships" element={<ProtectedRoute requirePermission="manage_scholarships"><ScholarshipManagement /></ProtectedRoute>} />
             <Route path="/reports" element={<ProtectedRoute requirePermission="view_reports"><Reports /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />

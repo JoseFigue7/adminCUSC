@@ -27,7 +27,7 @@ class StudentFilter(django_filters.FilterSet):
         label='Tipo de beca'
     )
     pensum_closed = django_filters.BooleanFilter(label='Pensum cerrado')
-    thesis_started = django_filters.BooleanFilter(label='Tesis iniciada')
+    graduation_method_started = django_filters.BooleanFilter(label='Método de graduación iniciado')
     
     # Filtros por fecha
     enrollment_date_from = django_filters.DateFilter(field_name='enrollment_date', lookup_expr='gte', label='Fecha de inscripción desde')

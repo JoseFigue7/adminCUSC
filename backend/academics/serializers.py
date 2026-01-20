@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Career, Cuatrimestre, Course, CourseEnrollment, CuatrimestreEnrollment, Thesis, CourseSchedule
+from .models import Career, Cuatrimestre, Course, CourseEnrollment, CuatrimestreEnrollment, GraduationMethod, CourseSchedule
 
 
 class CourseScheduleSerializer(serializers.ModelSerializer):
@@ -145,14 +145,15 @@ class CourseEnrollmentSerializer(serializers.ModelSerializer):
         return None
 
 
-class ThesisSerializer(serializers.ModelSerializer):
+class GraduationMethodSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source='student.get_full_name', read_only=True)
     student_carnet = serializers.CharField(source='student.carnet', read_only=True)
     student_id = serializers.CharField(source='student.id', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    method_type_display = serializers.CharField(source='get_method_type_display', read_only=True)
     
     class Meta:
-        model = Thesis
+        model = GraduationMethod
         fields = '__all__'
 
 

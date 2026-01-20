@@ -298,5 +298,180 @@
   font-style: italic;
 }
 
+/* Table Container Styles */
+.table-container {
+  overflow-x: auto;
+  overflow-y: visible;
+  width: 100%;
+  max-width: 100%;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  -webkit-overflow-scrolling: touch;
+}
+
+.data-table {
+  width: 100%;
+  min-width: 1600px; /* Ancho mínimo para que todas las columnas quepan bien */
+  border-collapse: collapse;
+  background: var(--bg-primary);
+  table-layout: auto;
+}
+
+.data-table thead {
+  background: var(--bg-secondary);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.data-table th {
+  padding: 0.875rem 1rem;
+  text-align: left;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 2px solid var(--border-color);
+  white-space: nowrap;
+  background: var(--bg-secondary);
+}
+
+.data-table td {
+  padding: 0.875rem 1rem;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  vertical-align: middle;
+}
+
+/* Optimizar ancho de columnas específicas */
+.data-table th:nth-child(1),
+.data-table td:nth-child(1) {
+  min-width: 180px;
+  max-width: 220px;
+}
+
+.data-table th:nth-child(2),
+.data-table td:nth-child(2) {
+  min-width: 120px;
+  max-width: 150px;
+}
+
+.data-table th:nth-child(3),
+.data-table td:nth-child(3) {
+  min-width: 160px;
+  max-width: 200px;
+}
+
+.data-table th:nth-child(4),
+.data-table td:nth-child(4) {
+  min-width: 120px;
+  max-width: 150px;
+}
+
+.data-table th:nth-child(5),
+.data-table td:nth-child(5) {
+  min-width: 120px;
+  max-width: 150px;
+}
+
+.data-table th:nth-child(6),
+.data-table td:nth-child(6) {
+  min-width: 120px;
+  max-width: 150px;
+}
+
+.data-table th:nth-child(7),
+.data-table td:nth-child(7) {
+  min-width: 160px;
+  max-width: 200px;
+}
+
+.data-table th:nth-child(8),
+.data-table td:nth-child(8) {
+  min-width: 150px;
+  max-width: 200px;
+}
+
+.data-table th:nth-child(9),
+.data-table td:nth-child(9) {
+  min-width: 100px;
+  max-width: 130px;
+  text-align: center;
+}
+
+.data-table th:nth-child(10),
+.data-table td:nth-child(10) {
+  min-width: 120px;
+  max-width: 150px;
+}
+
+.data-table th:nth-child(11),
+.data-table td:nth-child(11) {
+  min-width: 150px;
+  max-width: 180px;
+  text-align: center;
+}
+
+/* Estilos para celdas específicas */
+.reference-cell {
+  min-width: 150px;
+  max-width: 200px;
+}
+
+.reference-cell input {
+  max-width: 100%;
+}
+
+.receipt-cell {
+  text-align: center;
+  min-width: 80px;
+}
+
+.student-cell strong {
+  word-break: break-word;
+  line-height: 1.4;
+}
+
+.date-cell {
+  white-space: nowrap;
+  font-size: 0.8125rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 1400px) {
+  .data-table {
+    min-width: 1600px;
+  }
+  
+  .data-table th,
+  .data-table td {
+    padding: 0.875rem 0.875rem;
+    font-size: 0.8125rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .table-container {
+    border-radius: var(--radius-md);
+  }
+  
+  .data-table {
+    min-width: 1000px;
+  }
+  
+  .data-table th,
+  .data-table td {
+    padding: 0.625rem 0.5rem;
+    font-size: 0.75rem;
+  }
+  
+  .data-table th {
+    font-size: 0.6875rem;
+  }
+}
+
 /* Empty and loading states are in shared.css */
 

@@ -2,9 +2,9 @@ from django.contrib import admin
 from django.utils.html import format_html
 from django.urls import reverse
 from .models import (
-    Career, Cuatrimestre, Course, CourseEnrollment, CuatrimestreEnrollment, Thesis, CourseSchedule,
+    Career, Cuatrimestre, Course, CourseEnrollment, CuatrimestreEnrollment, GraduationMethod, CourseSchedule,
     AcademicPeriodConfig, MonthlyPaymentDueDate,
-    CuatrimestreEnrollmentStatusHistory, ThesisStatusHistory
+    CuatrimestreEnrollmentStatusHistory, GraduationMethodStatusHistory
 )
 
 
@@ -582,20 +582,21 @@ class CourseEnrollmentAdmin(admin.ModelAdmin):
     status_badge.admin_order_field = 'status'
 
 
-@admin.register(Thesis)
-class ThesisAdmin(admin.ModelAdmin):
+@admin.register(GraduationMethod)
+class GraduationMethodAdmin(admin.ModelAdmin):
     list_display = [
-        'student_link', 'title_short', 'status_badge',
+        'student_link', 'method_type', 'title_short', 'status_badge',
         'advisor_display', 'start_date', 'defense_date'
     ]
-    list_filter = ['status', 'start_date']
+    list_filter = ['method_type', 'status', 'start_date']
     search_fields = ['student__first_name', 'student__first_last_name', 'title', 'advisor']
     readonly_fields = ['id', 'created_at', 'updated_at', 'document_link']
     
     fieldsets = (
-        ('Información de la Tesis', {
+        ('Información del Método de Graduación', {
             'fields': (
                 'student',
+                'method_type',
                 'title',
                 'advisor',
                 'status',
@@ -647,7 +648,7 @@ class ThesisAdmin(admin.ModelAdmin):
     title_short.admin_order_field = 'title'
     
     def status_badge(self, obj):
-        """Badge para estado de la tesis"""
+        """Badge para estado del método de graduación"""
         colors = {
             'NO_INICIADA': '#6c757d',
             'SOLICITUD_ASESOR': '#17a2b8',
@@ -680,7 +681,7 @@ class ThesisAdmin(admin.ModelAdmin):
         """Link al documento"""
         if obj.document:
             return format_html(
-                '<a href="{}" target="_blank">📄 Ver documento de tesis</a>',
+                '<a href="{}" target="_blank">📄 Ver documento</a>',
                 obj.document.url
             )
         return format_html('<span style="color: #999;">Sin documento</span>')

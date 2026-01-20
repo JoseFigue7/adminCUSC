@@ -3,6 +3,8 @@ from django.core.validators import RegexValidator, MaxLengthValidator, MinValueV
 from django.core.exceptions import ValidationError
 import uuid
 import re
+import secrets
+import string
 
 
 # ==================== VALIDADORES PERSONALIZADOS ====================
@@ -45,6 +47,95 @@ def validate_mexican_phone(value):
         raise ValidationError('El código de área (LADA) no es válido para México. El primer dígito debe ser entre 2 y 9.')
     
     return value
+
+
+# ==================== FUNCIONES PARA GENERAR CREDENCIALES DE MOODLE ====================
+
+def generate_moodle_username(first_name, first_last_name, second_last_name):
+    """
+    Genera un nombre de usuario para Moodle basado en:
+    - Primera letra del primer nombre (minúscula)
+    - Apellido completo (minúscula, sin espacios)
+    - Primera letra del segundo apellido (minúscula)
+    
+    Si el usuario ya existe, agrega un número secuencial (1, 2, 3, etc.)
+    
+    Ejemplo: Jose, Figueroa, Morales -> jfigueroam
+    Si jfigueroam existe, el siguiente será jfigueroam1, luego jfigueroam2, etc.
+    
+    Args:
+        first_name: Primer nombre del estudiante
+        first_last_name: Primer apellido del estudiante
+        second_last_name: Segundo apellido del estudiante (puede ser None)
+    
+    Returns:
+        str: Nombre de usuario único para Moodle
+    """
+    # Normalizar nombres: convertir a minúsculas y eliminar acentos y espacios
+    def normalize_text(text):
+        if not text:
+            return ''
+        # Convertir a minúsculas
+        text = text.lower().strip()
+        # Eliminar espacios
+        text = text.replace(' ', '')
+        # Eliminar acentos básicos (puedes expandir esto si es necesario)
+        replacements = {
+            'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u',
+            'ñ': 'n', 'ü': 'u'
+        }
+        for old, new in replacements.items():
+            text = text.replace(old, new)
+        return text
+    
+    # Obtener primera letra del primer nombre
+    first_name_normalized = normalize_text(first_name) if first_name else ''
+    first_letter = first_name_normalized[0] if first_name_normalized else ''
+    
+    # Obtener apellido completo normalizado
+    first_last = normalize_text(first_last_name) if first_last_name else ''
+    
+    # Obtener primera letra del segundo apellido
+    second_last_name_normalized = normalize_text(second_last_name) if second_last_name else ''
+    second_letter = second_last_name_normalized[0] if second_last_name_normalized else ''
+    
+    # Construir base del usuario
+    base_username = f"{first_letter}{first_last}{second_letter}"
+    
+    # Validar que el usuario base no esté vacío
+    if not base_username:
+        raise ValueError('No se puede generar un usuario de Moodle: los nombres del estudiante están vacíos.')
+    
+    # Verificar si existe y generar variante con número si es necesario
+    # Usar referencia diferida para evitar importación circular
+    from django.apps import apps
+    Student = apps.get_model('students', 'Student')
+    
+    username = base_username
+    counter = 0
+    
+    # Verificar si el usuario base ya existe
+    while Student.objects.filter(moodle_username=username).exists():
+        counter += 1
+        username = f"{base_username}{counter}"
+    
+    return username
+
+
+def generate_moodle_password(length=12):
+    """
+    Genera una contraseña aleatoria segura para Moodle.
+    
+    Args:
+        length: Longitud de la contraseña (por defecto 12 caracteres)
+    
+    Returns:
+        str: Contraseña aleatoria segura
+    """
+    # Caracteres permitidos: letras (mayúsculas y minúsculas), números y algunos símbolos
+    alphabet = string.ascii_letters + string.digits + "!@#$%&*"
+    password = ''.join(secrets.choice(alphabet) for _ in range(length))
+    return password
 
 
 # ==================== MODELOS DE CATÁLOGOS SEP ====================
@@ -342,7 +433,24 @@ class Student(models.Model):
     
     # Estados
     pensum_closed = models.BooleanField(default=False, verbose_name='Pensum cerrado')
-    thesis_started = models.BooleanField(default=False, verbose_name='Tesis iniciada')
+    graduation_method_started = models.BooleanField(default=False, verbose_name='Método de graduación iniciado')
+    
+    # Credenciales para plataforma Moodle (no para este sistema)
+    moodle_username = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        unique=True,
+        verbose_name='Usuario de Moodle',
+        help_text='Usuario generado automáticamente para acceso a la plataforma Moodle'
+    )
+    moodle_password = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        verbose_name='Contraseña de Moodle',
+        help_text='Contraseña generada automáticamente para acceso a la plataforma Moodle'
+    )
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -588,16 +696,10 @@ class StudentDocument(models.Model):
     
     DOCUMENT_TYPES = [
         ('BACHILLERATO_ORIGINAL', 'Certificado de Bachillerato (Original)'),
-        ('BACHILLERATO_COPIA1', 'Certificado de Bachillerato (Copia 1)'),
-        ('BACHILLERATO_COPIA2', 'Certificado de Bachillerato (Copia 2)'),
         ('NACIMIENTO_ORIGINAL', 'Acta de Nacimiento (Original)'),
-        ('NACIMIENTO_COPIA1', 'Acta de Nacimiento (Copia 1)'),
-        ('NACIMIENTO_COPIA2', 'Acta de Nacimiento (Copia 2)'),
         ('CURP', 'CURP'),
         ('MEDICO', 'Certificado Médico'),
         ('FOTO_DIGITAL', 'Fotografía Digital para Carnet'),
-        ('FOTO_FISICA1', 'Fotografía Física 1'),
-        ('FOTO_FISICA2', 'Fotografía Física 2'),
         ('DOMICILIO', 'Comprobante de Domicilio'),
     ]
     

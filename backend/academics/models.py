@@ -161,8 +161,8 @@ class Course(models.Model):
     def get_academic_period(self):
         """
         Determina el período académico (1, 2 o 3) basado en el número de cuatrimestre.
-        Período 1 (Enero-Abril): Cuatrimestres 1, 4, 7
-        Período 2 (Mayo-Agosto): Cuatrimestres 2, 5, 8
+        Período 1 (Febrero-Mayo): Cuatrimestres 1, 4, 7
+        Período 2 (Junio-Agosto): Cuatrimestres 2, 5, 8
         Período 3 (Septiembre-Diciembre): Cuatrimestres 3, 6, 9
         """
         if self.cuatrimestre:
@@ -247,8 +247,8 @@ def get_academic_period(cuatrimestre_number):
     """
     Función helper para determinar el período académico basado en el número de cuatrimestre.
     
-    Período 1 (Enero-Abril): Cuatrimestres 1, 4, 7
-    Período 2 (Mayo-Agosto): Cuatrimestres 2, 5, 8
+    Período 1 (Febrero-Mayo): Cuatrimestres 1, 4, 7
+    Período 2 (Junio-Agosto): Cuatrimestres 2, 5, 8
     Período 3 (Septiembre-Diciembre): Cuatrimestres 3, 6, 9
     
     Args:
@@ -366,8 +366,8 @@ class AcademicPeriodConfig(models.Model):
     """Modelo para configuración de períodos académicos (fechas límite de pago, mora, etc.)"""
     
     PERIOD_CHOICES = [
-        (1, 'Período 1 (Enero-Abril)'),
-        (2, 'Período 2 (Mayo-Agosto)'),
+        (1, 'Período 1 (Febrero-Mayo)'),
+        (2, 'Período 2 (Junio-Agosto)'),
         (3, 'Período 3 (Septiembre-Diciembre)'),
     ]
     
@@ -403,8 +403,8 @@ class AcademicPeriodConfig(models.Model):
     def get_months(self):
         """Retorna los meses que corresponden a este período"""
         period_months = {
-            1: [1, 2, 3, 4],  # Enero-Abril
-            2: [5, 6, 7, 8],  # Mayo-Agosto
+            1: [2, 3, 4, 5],  # Febrero-Mayo
+            2: [6, 7, 8],  # Junio-Agosto
             3: [9, 10, 11, 12],  # Septiembre-Diciembre
         }
         return period_months.get(self.period, [])
@@ -784,8 +784,15 @@ class CourseEnrollment(models.Model):
         super().save(*args, **kwargs)
 
 
-class Thesis(models.Model):
-    """Modelo para tesis de estudiantes"""
+class GraduationMethod(models.Model):
+    """Modelo para métodos de graduación de estudiantes"""
+    
+    METHOD_TYPE_CHOICES = [
+        ('EXAMEN_PROFESIONAL', 'Examen Profesional'),
+        ('TESINA', 'Tesina'),
+        ('TESIS', 'Tesis'),
+        ('DIPLOMADO', 'Diplomado'),
+    ]
     
     STATUS_CHOICES = [
         ('NO_INICIADA', 'No Iniciada'),
@@ -800,25 +807,26 @@ class Thesis(models.Model):
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    student = models.OneToOneField('students.Student', on_delete=models.CASCADE, related_name='thesis', verbose_name='Estudiante')
-    title = models.CharField(max_length=500, blank=True, verbose_name='Título de la tesis')
+    student = models.OneToOneField('students.Student', on_delete=models.CASCADE, related_name='graduation_method', verbose_name='Estudiante')
+    method_type = models.CharField(max_length=30, choices=METHOD_TYPE_CHOICES, verbose_name='Método de Graduación')
+    title = models.CharField(max_length=500, blank=True, verbose_name='Título')
     advisor = models.CharField(max_length=200, blank=True, verbose_name='Asesor')
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='NO_INICIADA', verbose_name='Estado')
     start_date = models.DateField(null=True, blank=True, verbose_name='Fecha de inicio')
-    defense_date = models.DateField(null=True, blank=True, verbose_name='Fecha de defensa')
+    defense_date = models.DateField(null=True, blank=True, verbose_name='Fecha de defensa/examen')
     notes = models.TextField(blank=True, verbose_name='Notas')
-    document = models.FileField(upload_to='thesis/', null=True, blank=True, verbose_name='Documento de tesis')
+    document = models.FileField(upload_to='graduation_methods/', null=True, blank=True, verbose_name='Documento')
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
-        verbose_name = 'Tesis'
-        verbose_name_plural = 'Tesis'
+        verbose_name = 'Método de Graduación'
+        verbose_name_plural = 'Métodos de Graduación'
         ordering = ['-created_at']
     
     def __str__(self):
-        return f"Tesis de {self.student.get_full_name()} - {self.get_status_display()}"
+        return f"{self.get_method_type_display()} de {self.student.get_full_name()} - {self.get_status_display()}"
 
 
 # ==================== MODELOS DE HISTORIAL DE CAMBIOS DE ESTADO ====================
@@ -878,17 +886,17 @@ class CuatrimestreEnrollmentStatusHistory(models.Model):
         return f"Inscripción Cuatrimestre {self.cuatrimestre_enrollment.id} - {self.previous_status or 'N/A'} → {self.new_status} ({self.changed_at})"
 
 
-class ThesisStatusHistory(models.Model):
-    """Modelo para rastrear cambios de estado en Thesis"""
+class GraduationMethodStatusHistory(models.Model):
+    """Modelo para rastrear cambios de estado en GraduationMethod"""
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     
     # Foreign key al modelo principal
-    thesis = models.ForeignKey(
-        Thesis,
+    graduation_method = models.ForeignKey(
+        GraduationMethod,
         on_delete=models.CASCADE,
         related_name='status_history',
-        verbose_name='Tesis'
+        verbose_name='Método de Graduación'
     )
     
     # Estados
@@ -920,15 +928,15 @@ class ThesisStatusHistory(models.Model):
     comment = models.TextField(blank=True, verbose_name='Comentario')
     
     class Meta:
-        verbose_name = 'Historial de Estado de Tesis'
-        verbose_name_plural = 'Historial de Estados de Tesis'
+        verbose_name = 'Historial de Estado de Método de Graduación'
+        verbose_name_plural = 'Historial de Estados de Métodos de Graduación'
         ordering = ['-changed_at']
         indexes = [
-            models.Index(fields=['thesis', 'changed_at']),
+            models.Index(fields=['graduation_method', 'changed_at']),
             models.Index(fields=['changed_at']),
-            models.Index(fields=['thesis']),
+            models.Index(fields=['graduation_method']),
         ]
     
     def __str__(self):
-        return f"Tesis {self.thesis.id} - {self.previous_status or 'N/A'} → {self.new_status} ({self.changed_at})"
+        return f"Método de Graduación {self.graduation_method.id} - {self.previous_status or 'N/A'} → {self.new_status} ({self.changed_at})"
 

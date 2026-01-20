@@ -122,6 +122,8 @@ export const paymentsApi = {
   getPendingCount: () => api.get('/payments/payments/pending_count/'),
   getPendingTransfers: (params?: any) => api.get('/payments/payments/pending_transfers/', { params }),
   getStatistics: () => api.get('/payments/payments/statistics/'),
+  getMyAccounting: () => api.get('/payments/payments/my_accounting/'),
+  getStudentAccounting: (studentId: string) => api.get(`/payments/payments/student_accounting/${studentId}/`),
   createPaymentIntent: (data: any) => api.post('/payments/public/payment-intent/', data),
   processPublicPayment: (data: any) => api.post('/payments/public/payment/', data),
 };
@@ -153,9 +155,10 @@ export const academicsApi = {
   deleteCourse: (id: number) => api.delete(`/academics/courses/${id}/`),
   createCourseEnrollment: (data: any) => api.post('/academics/enrollments/', data),
   getCuatrimestres: (params?: any) => api.get('/academics/cuatrimestres/', { params }),
-  getThesis: (params?: any) => api.get('/academics/thesis/', { params }),
-  getThesisByStudent: (studentId: string | number) => api.get('/academics/thesis/by_student/', { params: { student_id: studentId } }),
-  updateThesisStatus: (id: string | number, status: string) => api.patch(`/academics/thesis/${id}/update_status/`, { status }),
+  getGraduationMethods: (params?: any) => api.get('/academics/graduation-methods/', { params }),
+  getGraduationMethodByStudent: (studentId: string | number) => api.get('/academics/graduation-methods/by_student/', { params: { student_id: studentId } }),
+  updateGraduationMethodStatus: (id: string | number, status: string) => api.patch(`/academics/graduation-methods/${id}/update_status/`, { status }),
+  createGraduationMethod: (data: any) => api.post('/academics/graduation-methods/', data),
   // Cuatrimestre Enrollments
   getCuatrimestreEnrollments: (params?: any) => api.get('/academics/cuatrimestre-enrollments/', { params }),
   getCuatrimestreEnrollment: (id: string | number) => api.get(`/academics/cuatrimestre-enrollments/${id}/`),
@@ -170,8 +173,10 @@ export const academicsApi = {
   getAvailableCourses: (id: string | number) => api.get(`/academics/cuatrimestre-enrollments/${id}/available_courses/`),
   previewBoleta: (id: string | number) => 
     api.get(`/academics/cuatrimestre-enrollments/${id}/preview_boleta/`, { responseType: 'blob' }),
-  confirmCourseAssignment: (id: string | number) => 
-    api.post(`/academics/cuatrimestre-enrollments/${id}/confirm_course_assignment/`),
+  confirmCourseAssignment: (id: string | number, paymentOption?: 'monthly' | 'full') => 
+    api.post(`/academics/cuatrimestre-enrollments/${id}/confirm_course_assignment/`, { payment_option: paymentOption || 'monthly' }),
+  getPaymentVoucher: (id: string | number) => 
+    api.get(`/academics/cuatrimestre-enrollments/${id}/payment_voucher/`, { responseType: 'blob' }),
   // Payment and enrollment flow
   processEnrollmentPayment: (id: string | number, data: { payment_method: string; payment_reference?: string; transfer_receipt?: File }) => {
     const formData = new FormData();
@@ -321,14 +326,15 @@ export const updateDocumentStatus = documentsApi.updateStatus;
 export const getEnrollment = enrollmentsApi.get;
 export const generateContract = enrollmentsApi.generateContract;
 
-// Thesis functions
-export const getThesis = (studentId?: string | number) => {
+// Graduation Method functions
+export const getGraduationMethod = (studentId?: string | number) => {
   if (studentId) {
-    return academicsApi.getThesisByStudent(studentId);
+    return academicsApi.getGraduationMethodByStudent(studentId);
   }
-  return academicsApi.getThesis();
+  return academicsApi.getGraduationMethods();
 };
-export const updateThesisStatus = academicsApi.updateThesisStatus;
+export const updateGraduationMethodStatus = academicsApi.updateGraduationMethodStatus;
+export const createGraduationMethod = academicsApi.createGraduationMethod;
 
 // Reports API
 export const reportsApi = {

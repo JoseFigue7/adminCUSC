@@ -1,13 +1,14 @@
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework import serializers
 from django.db import transaction
 from django.utils import timezone
 from django.http import HttpResponse
 from datetime import datetime, timedelta
 from decimal import Decimal
 from .models import (
-    Career, Cuatrimestre, Course, CourseEnrollment, CuatrimestreEnrollment, Thesis,
+    Career, Cuatrimestre, Course, CourseEnrollment, CuatrimestreEnrollment, GraduationMethod,
     CourseSchedule, get_academic_period, get_cuatrimestres_by_period,
     AcademicPeriodConfig, MonthlyPaymentDueDate
 )
@@ -15,7 +16,7 @@ from .services import PreAssignCoursesService, ConfirmCourseAssignmentService
 from .pdf_utils import generate_assignment_boleta, generate_payment_voucher
 from .serializers import (
     CareerSerializer, CuatrimestreSerializer, CourseSerializer,
-    CourseEnrollmentSerializer, CuatrimestreEnrollmentSerializer, ThesisSerializer,
+    CourseEnrollmentSerializer, CuatrimestreEnrollmentSerializer, GraduationMethodSerializer,
     BulkGradeUploadSerializer
 )
 from students.models import Student
@@ -144,6 +145,14 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
         """Capturar usuario que realiza el cambio"""
         user = self.request.user if self.request.user.is_authenticated else None
         instance = serializer.instance
+        
+        # No permitir modificar asignaciones confirmadas (EN_CURSO o FINALIZADO)
+        if instance.status in ['EN_CURSO', 'FINALIZADO']:
+            raise serializers.ValidationError(
+                f'No se puede modificar una asignación que está en estado {instance.get_status_display()}. '
+                'La asignación ya fue confirmada y no puede ser modificada.'
+            )
+        
         new_status = serializer.validated_data.get('status', instance.status)
         old_status = instance.status
         
@@ -165,6 +174,15 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
         instance._changed_by_user = user
         instance._status_change_notes = self.request.data.get('notes', '') or ''
         return instance
+    
+    def perform_destroy(self, instance):
+        """No permitir eliminar asignaciones confirmadas"""
+        if instance.status in ['EN_CURSO', 'FINALIZADO']:
+            raise serializers.ValidationError(
+                f'No se puede eliminar una asignación que está en estado {instance.get_status_display()}. '
+                'La asignación ya fue confirmada y no puede ser eliminada.'
+            )
+        super().perform_destroy(instance)
     
     @action(detail=True, methods=['post'])
     def enroll_courses(self, request, pk=None):
@@ -579,33 +597,72 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['get'])
     def calculate_tuition(self, request, pk=None):
-        """Calcular el costo total de la colegiatura basado en los cursos asignados"""
+        """Calcular el costo total de la colegiatura: base (tipo 102) + adicionales de cursos"""
+        from payments.models import PaymentType
+        
         cuatrimestre_enrollment = self.get_object()
+        career = cuatrimestre_enrollment.cuatrimestre.career
         
-        # Obtener cursos inscritos
+        # Obtener monto base mensual del tipo de pago 102 (Colegiatura de Cursos)
+        try:
+            tuition_payment_type = PaymentType.objects.get(code='102', is_active=True)
+            base_monthly_amount = tuition_payment_type.amount or Decimal('0.00')
+            if base_monthly_amount == 0:
+                return Response(
+                    {'error': 'Tipo de pago 102 (Colegiatura de Cursos) no tiene monto configurado'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except PaymentType.DoesNotExist:
+            return Response(
+                {'error': 'Tipo de pago 102 (Colegiatura de Cursos) no encontrado. Ejecute el comando seed_payment_types.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Calcular adicionales de cursos (course.cost ahora son adicionales)
+        course_additionals = Decimal('0.00')
         course_enrollments = cuatrimestre_enrollment.course_enrollments.select_related('course').all()
-        
-        total_cost = Decimal('0.00')
         courses_detail = []
         
         for enrollment in course_enrollments:
-            course_cost = enrollment.course.cost or Decimal('0.00')
-            total_cost += course_cost
+            course_additional = enrollment.course.cost or Decimal('0.00')
+            course_additionals += course_additional
             courses_detail.append({
                 'course_id': str(enrollment.course.id),
                 'course_code': enrollment.course.code,
                 'course_name': enrollment.course.name,
-                'cost': str(course_cost)
+                'additional_cost': str(course_additional)  # Ahora es adicional, no costo total
             })
         
+        # Pago mensual total = base + adicionales
+        monthly_payment = base_monthly_amount + course_additionals
+        
+        # Obtener período académico para calcular total del cuatrimestre
+        period = get_academic_period(cuatrimestre_enrollment.cuatrimestre.number)
+        try:
+            period_config = AcademicPeriodConfig.objects.get(period=period, is_active=True)
+            months = period_config.get_months()
+        except AcademicPeriodConfig.DoesNotExist:
+            period_months = {
+                1: [2, 3, 4, 5],  # Febrero-Mayo
+                2: [6, 7, 8],  # Junio-Agosto
+                3: [9, 10, 11, 12]  # Septiembre-Diciembre
+            }
+            months = period_months.get(period, [2, 3, 4, 5])
+        
+        # Total del cuatrimestre = pago_mensual * número_de_meses
+        total_cuatrimestre = monthly_payment * len(months)
+        
         return Response({
-            'total_tuition': str(total_cost),
+            'base_monthly_amount': str(base_monthly_amount),  # Monto base del tipo 102
+            'course_additionals': str(course_additionals),  # Adicionales de cursos
+            'monthly_payment': str(monthly_payment),  # Pago mensual total
+            'total_cuatrimestre': str(total_cuatrimestre),  # Total del cuatrimestre
             'courses_count': len(courses_detail),
             'courses': courses_detail,
             'payment_plan': {
-                'monthly_payment': str(total_cost / 4),
-                'full_payment_discount': str(total_cost * Decimal('0.10')),
-                'full_payment_total': str(total_cost * Decimal('0.90'))
+                'monthly_payment': str(monthly_payment),
+                'full_payment_discount': str(total_cuatrimestre * Decimal('0.10')),
+                'full_payment_total': str(total_cuatrimestre * Decimal('0.90'))
             }
         })
     
@@ -631,10 +688,28 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
         payment_option = request.data.get('payment_option', 'monthly')  # 'monthly' o 'full'
         
         with transaction.atomic():
-            # Calcular colegiatura
-            total_tuition = Decimal('0.00')
+            # Obtener monto base mensual del tipo de pago 102 (Colegiatura de Cursos)
+            try:
+                tuition_payment_type = PaymentType.objects.get(code='102', is_active=True)
+                base_monthly_amount = tuition_payment_type.amount or Decimal('0.00')
+                if base_monthly_amount == 0:
+                    return Response(
+                        {'error': 'Tipo de pago 102 (Colegiatura de Cursos) no tiene monto configurado'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            except PaymentType.DoesNotExist:
+                return Response(
+                    {'error': 'Tipo de pago 102 (Colegiatura de Cursos) no encontrado. Ejecute el comando seed_payment_types.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Calcular adicionales de cursos (course.cost ahora son adicionales)
+            course_additionals = Decimal('0.00')
             for enrollment in cuatrimestre_enrollment.course_enrollments.select_related('course').all():
-                total_tuition += enrollment.course.cost or Decimal('0.00')
+                course_additionals += enrollment.course.cost or Decimal('0.00')
+            
+            # Pago mensual total = base + adicionales
+            monthly_amount = base_monthly_amount + course_additionals
             
             # Obtener período académico y configuración
             period = get_academic_period(cuatrimestre_enrollment.cuatrimestre.number)
@@ -649,45 +724,64 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
             else:
                 # Fallback a meses por defecto según período
                 period_months = {
-                    1: [1, 2, 3, 4],
-                    2: [5, 6, 7, 8],
-                    3: [9, 10, 11, 12]
+                    1: [2, 3, 4, 5],  # Febrero-Mayo
+                    2: [6, 7, 8],  # Junio-Agosto
+                    3: [9, 10, 11, 12]  # Septiembre-Diciembre
                 }
-                months = period_months.get(period, [1, 2, 3, 4])
-            
-            # Obtener o crear tipo de pago de colegiatura (código 201)
-            tuition_payment_type, _ = PaymentType.objects.get_or_create(
-                code='201',
-                defaults={
-                    'name': 'Colegiatura Cursos',
-                    'description': 'Pago de colegiatura por cursos',
-                    'is_active': True
-                }
-            )
+                months = period_months.get(period, [2, 3, 4, 5])
             
             payments_created = []
             
             if payment_option == 'full':
                 # Pago completo con 10% de descuento
-                discounted_amount = total_tuition * Decimal('0.90')
+                # El pago mensual ya incluye base + adicionales, entonces el total del cuatrimestre es: pago_mensual * número_de_meses
+                total_cuatrimestre = monthly_amount * len(months)
+                discounted_amount = total_cuatrimestre * Decimal('0.90')
+                current_year = cuatrimestre_enrollment.academic_year
+                first_month = months[0] if months else 1
+                
+                # Establecer fecha programada de pago al día 1 del primer mes del período
+                payment_date = datetime(current_year, first_month, 1).date()
+                
+                # Obtener fecha límite de pago
+                try:
+                    due_date_config = MonthlyPaymentDueDate.objects.get(month=first_month, is_active=True)
+                    due_day = due_date_config.due_day
+                except MonthlyPaymentDueDate.DoesNotExist:
+                    due_day = 10  # Valor por defecto
+                
+                # Calcular fecha límite
+                try:
+                    due_date = datetime(current_year, first_month, due_day).date()
+                except ValueError:
+                    if first_month == 2:
+                        due_date = datetime(current_year, first_month, 28).date()
+                    else:
+                        due_date = datetime(current_year, first_month, due_day).date()
                 
                 payment = Payment.objects.create(
                     student=cuatrimestre_enrollment.student,
                     payment_type=tuition_payment_type,
                     payment_method='TRANSFERENCIA',  # Por defecto, se puede cambiar
-                    amount=discounted_amount,
-                    status='PENDIENTE',
+                    original_amount=discounted_amount,
+                    month=first_month,
+                    year=current_year,
+                    payment_date=payment_date,  # Fecha programada: día 1 del primer mes
+                    due_date=due_date,
+                    status='NO_PAGADO',  # Estado inicial: NO_PAGADO
                     cuatrimestre_enrollment=cuatrimestre_enrollment,
-                    year=cuatrimestre_enrollment.academic_year,
-                    notes=f'Pago completo de colegiatura con 10% descuento. Monto original: {total_tuition}, Descuento: {total_tuition * Decimal("0.10")}'
+                    notes=f'Pago completo de colegiatura con 10% descuento. Monto original: {total_cuatrimestre}, Descuento: {total_cuatrimestre * Decimal("0.10")}, Pago mensual base: {base_monthly_amount}, Adicionales cursos: {course_additionals}'
                 )
                 payments_created.append(str(payment.id))
             else:
-                # Pagos mensuales (4 pagos)
-                monthly_amount = total_tuition / 4
+                # Pagos mensuales (uno por cada mes del período)
+                # monthly_amount ya incluye base + adicionales
                 current_year = cuatrimestre_enrollment.academic_year
                 
-                for month in months[:4]:  # Solo los primeros 4 meses del período
+                for month in months:  # Generar un pago por cada mes del período
+                    # Establecer fecha programada de pago al día 1 del mes correspondiente
+                    payment_date = datetime(current_year, month, 1).date()
+                    
                     # Obtener fecha límite de pago para este mes
                     try:
                         due_date_config = MonthlyPaymentDueDate.objects.get(month=month, is_active=True)
@@ -709,11 +803,12 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
                         student=cuatrimestre_enrollment.student,
                         payment_type=tuition_payment_type,
                         payment_method='TRANSFERENCIA',  # Por defecto, se puede cambiar
-                        amount=monthly_amount,
+                        original_amount=monthly_amount,
                         month=month,
                         year=current_year,
+                        payment_date=payment_date,  # Fecha programada: día 1 del mes
                         due_date=due_date,
-                        status='PENDIENTE',
+                        status='NO_PAGADO',  # Estado inicial: NO_PAGADO
                         cuatrimestre_enrollment=cuatrimestre_enrollment,
                         notes=f'Colegiatura mensual - {dict(Payment.MONTHS)[month]} {current_year}'
                     )
@@ -747,14 +842,26 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
         # Obtener información del estudiante
         student = cuatrimestre_enrollment.student
         
-        # Obtener cursos con horarios
-        course_enrollments = cuatrimestre_enrollment.course_enrollments.select_related('course').prefetch_related('course__schedules').all()
-        
+        # Obtener cursos con horarios (solo para mostrar, no para calcular costo)
+        # Puede venir de dos flujos:
+        # 1. Cursos pre-asignados (pre_assign_course_ids) - antes de confirmar
+        # 2. CourseEnrollment existentes - después de confirmar
         courses_data = []
-        total_tuition = Decimal('0.00')
         
-        for enrollment in course_enrollments:
-            course = enrollment.course
+        pre_assigned_ids = cuatrimestre_enrollment.pre_assign_course_ids or []
+        
+        if pre_assigned_ids:
+            # Obtener cursos desde los IDs pre-asignados (antes de confirmar)
+            from uuid import UUID
+            from .models import Course
+            course_uuids = [UUID(cid) for cid in pre_assigned_ids]
+            courses = Course.objects.filter(id__in=course_uuids).prefetch_related('schedules')
+        else:
+            # Obtener cursos desde CourseEnrollment (después de confirmar)
+            course_enrollments = cuatrimestre_enrollment.course_enrollments.select_related('course').prefetch_related('course__schedules').all()
+            courses = [enrollment.course for enrollment in course_enrollments]
+        
+        for course in courses:
             schedules = [
                 {
                     'day': schedule.day,
@@ -764,19 +871,41 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
                 for schedule in course.schedules.all()
             ]
             
-            course_cost = course.cost or Decimal('0.00')
-            total_tuition += course_cost
-            
             courses_data.append({
                 'code': course.code,
                 'name': course.name,
                 'credits': course.credits,
-                'cost': str(course_cost),
                 'schedules': schedules
             })
         
+        # Obtener monto base mensual del tipo de pago 102 (Colegiatura de Cursos)
+        career = cuatrimestre_enrollment.cuatrimestre.career
+        try:
+            tuition_payment_type = PaymentType.objects.get(code='102', is_active=True)
+            base_monthly_amount = tuition_payment_type.amount or Decimal('0.00')
+            if base_monthly_amount == 0:
+                return Response(
+                    {'error': 'Tipo de pago 102 (Colegiatura de Cursos) no tiene monto configurado'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except PaymentType.DoesNotExist:
+            return Response(
+                {'error': 'Tipo de pago 102 (Colegiatura de Cursos) no encontrado. Ejecute el comando seed_payment_types.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Calcular adicionales de cursos (course.cost ahora son adicionales)
+        course_additionals = Decimal('0.00')
+        for course in courses:
+            course_additional = course.cost or Decimal('0.00')
+            course_additionals += course_additional
+        
+        # Pago mensual total = base + adicionales
+        monthly_amount = base_monthly_amount + course_additionals
+        
         # Obtener período académico y configuración
         period = get_academic_period(cuatrimestre_enrollment.cuatrimestre.number)
+        period_config = None
         try:
             period_config = AcademicPeriodConfig.objects.get(period=period, is_active=True)
             penalty_percentage = period_config.penalty_percentage
@@ -788,18 +917,17 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
             months = period_config.get_months()
         else:
             period_months = {
-                1: [1, 2, 3, 4],
-                2: [5, 6, 7, 8],
-                3: [9, 10, 11, 12]
+                1: [2, 3, 4, 5],  # Febrero-Mayo
+                2: [6, 7, 8],  # Junio-Agosto
+                3: [9, 10, 11, 12]  # Septiembre-Diciembre
             }
-            months = period_months.get(period, [1, 2, 3, 4])
+            months = period_months.get(period, [2, 3, 4, 5])
         
         # Calcular plan de pagos mensuales
-        monthly_amount = total_tuition / 4
         payment_plan = []
         current_year = cuatrimestre_enrollment.academic_year
         
-        for month in months[:4]:
+        for month in months:
             try:
                 due_date_config = MonthlyPaymentDueDate.objects.get(month=month, is_active=True)
                 due_day = due_date_config.due_day
@@ -818,8 +946,8 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
         
         # Información del período académico
         period_names = {
-            1: 'Enero - Abril',
-            2: 'Mayo - Agosto',
+            1: 'Febrero - Mayo',
+            2: 'Junio - Agosto',
             3: 'Septiembre - Diciembre'
         }
         period_name = period_names.get(period, '')
@@ -839,11 +967,13 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
             },
             'courses': courses_data,
             'tuition': {
-                'total': str(total_tuition),
-                'monthly_payment': str(monthly_amount),
+                'base_monthly_amount': str(base_monthly_amount),  # Monto base del tipo 102
+                'course_additionals': str(course_additionals),  # Adicionales de cursos
+                'monthly_payment': str(monthly_amount),  # Pago mensual total
+                'total_cuatrimestre': str(monthly_amount * len(months)),  # Total del cuatrimestre
                 'payment_plan': payment_plan,
-                'full_payment_discount': str(total_tuition * Decimal('0.10')),
-                'full_payment_total': str(total_tuition * Decimal('0.90'))
+                'full_payment_discount': str((monthly_amount * len(months)) * Decimal('0.10')),
+                'full_payment_total': str((monthly_amount * len(months)) * Decimal('0.90'))
             },
             'generated_at': timezone.now().isoformat()
         }
@@ -857,6 +987,15 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
         Los cursos se pre-asignan pero NO se confirman hasta que se llame a confirm_course_assignment.
         """
         cuatrimestre_enrollment = self.get_object()
+        
+        # No permitir pre-asignar cursos si ya está confirmado
+        if cuatrimestre_enrollment.status in ['EN_CURSO', 'FINALIZADO']:
+            return Response(
+                {
+                    'error': f'No se pueden pre-asignar cursos. La asignación ya está confirmada (estado: {cuatrimestre_enrollment.get_status_display()}).'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
         course_ids = request.data.get('course_ids', [])
         
         if not course_ids:
@@ -926,12 +1065,28 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
         """
         Confirmar asignación de cursos (PASO CRÍTICO).
         Una vez confirmada, los CourseEnrollment se vuelven definitivos y se generan los pagos.
+        La asignación queda en estado EN_CURSO y no puede ser modificada ni eliminada.
+        
+        Body params:
+            payment_option: 'monthly' para pagos mensuales o 'full' para pago completo (default: 'monthly')
         """
         cuatrimestre_enrollment = self.get_object()
         
+        # No permitir confirmar si ya está confirmado
+        if cuatrimestre_enrollment.status in ['EN_CURSO', 'FINALIZADO']:
+            return Response(
+                {
+                    'error': f'La asignación ya está confirmada (estado: {cuatrimestre_enrollment.get_status_display()}). No se puede confirmar nuevamente.'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Obtener opción de pago del request
+        payment_option = request.data.get('payment_option', 'monthly')
+        
         # Usar el servicio de confirmación
         service = ConfirmCourseAssignmentService(cuatrimestre_enrollment)
-        result = service.confirm_assignment()
+        result = service.confirm_assignment(payment_option=payment_option)
         
         if not result['success']:
             return Response(
@@ -960,17 +1115,88 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
         """
         cuatrimestre_enrollment = self.get_object()
         
-        # Validar que tenga pagos generados
-        from payments.models import Payment
-        payments_count = Payment.objects.filter(
-            cuatrimestre_enrollment=cuatrimestre_enrollment
-        ).count()
+        # Refrescar desde la BD para asegurar que tenemos los datos más recientes
+        cuatrimestre_enrollment.refresh_from_db()
         
-        if payments_count == 0:
+        # Validar que tenga pagos generados (solo pagos de colegiatura, código 201)
+        from payments.models import Payment, PaymentType
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        
+        try:
+            tuition_payment_type = PaymentType.objects.get(code='102')
+        except PaymentType.DoesNotExist:
+            logger.error(f'PaymentType con código 102 no encontrado para cuatrimestre_enrollment {cuatrimestre_enrollment.id}')
             return Response(
-                {'error': 'No hay pagos generados para este cuatrimestre. Debe confirmar la asignación primero.'},
+                {'error': 'No se encontró el tipo de pago de colegiatura (código 102). Contacte al administrador.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+        
+        # Debug: Verificar todos los pagos relacionados
+        all_payments = Payment.objects.filter(cuatrimestre_enrollment=cuatrimestre_enrollment)
+        logger.info(f'Total pagos para cuatrimestre_enrollment {cuatrimestre_enrollment.id}: {all_payments.count()}')
+        for p in all_payments:
+            logger.info(f'  - Pago {p.id}: tipo={p.payment_type.code if p.payment_type else None}, monto={p.original_amount}')
+        
+        payments = Payment.objects.filter(
+            cuatrimestre_enrollment=cuatrimestre_enrollment,
+            payment_type=tuition_payment_type
+        )
+        
+        payments_count = payments.count()
+        logger.info(f'Pagos de colegiatura (código 201) para cuatrimestre_enrollment {cuatrimestre_enrollment.id}: {payments_count}')
+        
+        if payments_count == 0:
+            # Si está exonerado, no debería haber pagos de colegiatura
+            if cuatrimestre_enrollment.is_enrollment_fee_exempt:
+                return Response(
+                    {'error': 'El estudiante está exonerado de pagos de colegiatura. No se requiere talonario de pagos.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Verificar si los cursos tienen costo asignado
+            course_enrollments = cuatrimestre_enrollment.course_enrollments.select_related('course').all()
+            total_tuition = Decimal('0.00')
+            for enrollment in course_enrollments:
+                total_tuition += enrollment.course.cost or Decimal('0.00')
+            
+            if total_tuition == 0:
+                return Response(
+                    {
+                        'error': 'Los cursos asignados no tienen costo asignado. No se requiere talonario de pagos.',
+                        'status': cuatrimestre_enrollment.status,
+                        'status_display': cuatrimestre_enrollment.get_status_display(),
+                        'courses_count': course_enrollments.count(),
+                        'hint': 'Asigne costos a los cursos para generar pagos de colegiatura.'
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Verificar si hay otros tipos de pagos
+            all_payments_count = Payment.objects.filter(
+                cuatrimestre_enrollment=cuatrimestre_enrollment
+            ).count()
+            
+            if all_payments_count == 0:
+                return Response(
+                    {
+                        'error': 'No hay pagos generados para este cuatrimestre. Debe confirmar la asignación primero.',
+                        'status': cuatrimestre_enrollment.status,
+                        'status_display': cuatrimestre_enrollment.get_status_display(),
+                        'hint': 'Si acaba de confirmar la asignación, espere unos segundos e intente nuevamente.'
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            else:
+                return Response(
+                    {
+                        'error': 'No hay pagos de colegiatura generados. Solo se encontraron otros tipos de pagos.',
+                        'tuition_payments_count': 0,
+                        'other_payments_count': all_payments_count
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
         
         try:
             # Generar PDF
@@ -981,6 +1207,9 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
             response['Content-Disposition'] = f'inline; filename="talonario_pagos_{cuatrimestre_enrollment.id}.pdf"'
             return response
         except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f'Error al generar talonario de pagos: {str(e)}', exc_info=True)
             return Response(
                 {'error': f'Error al generar talonario: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -1219,9 +1448,9 @@ class CourseEnrollmentViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
-class ThesisViewSet(viewsets.ModelViewSet):
-    queryset = Thesis.objects.all()
-    serializer_class = ThesisSerializer
+class GraduationMethodViewSet(viewsets.ModelViewSet):
+    queryset = GraduationMethod.objects.all()
+    serializer_class = GraduationMethodSerializer
     permission_classes = [permissions.IsAuthenticated]
     
     def get_permissions(self):
@@ -1231,11 +1460,17 @@ class ThesisViewSet(viewsets.ModelViewSet):
         return [permissions.IsAuthenticated(), HasPermission('manage_thesis')]
     
     def perform_create(self, serializer):
-        """Capturar usuario que crea la tesis"""
+        """Capturar usuario que crea el método de graduación y validar que el estudiante haya completado el pensum"""
+        student = serializer.validated_data.get('student')
+        if not student or not student.pensum_closed:
+            raise serializers.ValidationError(
+                {'student': 'El estudiante debe haber completado todos los cursos del pensum para iniciar un método de graduación.'}
+            )
+        
         user = self.request.user if self.request.user.is_authenticated else None
         instance = serializer.save()
         instance._changed_by_user = user
-        instance._status_change_notes = 'Tesis creada'
+        instance._status_change_notes = 'Método de graduación creado'
         return instance
     
     def perform_update(self, serializer):
@@ -1248,28 +1483,28 @@ class ThesisViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['patch'])
     def update_status(self, request, pk=None):
-        """Actualizar estado de la tesis"""
-        thesis = self.get_object()
+        """Actualizar estado del método de graduación"""
+        graduation_method = self.get_object()
         new_status = request.data.get('status')
         
         if new_status:
             # Pasar usuario para el historial de cambios
             user = request.user if request.user.is_authenticated else None
-            thesis._changed_by_user = user
-            thesis._status_change_notes = request.data.get('notes', '') or f'Estado cambiado a {new_status}'
+            graduation_method._changed_by_user = user
+            graduation_method._status_change_notes = request.data.get('notes', '') or f'Estado cambiado a {new_status}'
             
-            thesis.status = new_status
-            if new_status == 'SOLICITUD_ASESOR' and not thesis.student.thesis_started:
-                thesis.student.thesis_started = True
-                thesis.student.save()
-            thesis.save()
+            graduation_method.status = new_status
+            if new_status == 'SOLICITUD_ASESOR' and not graduation_method.student.graduation_method_started:
+                graduation_method.student.graduation_method_started = True
+                graduation_method.student.save()
+            graduation_method.save()
         
-        serializer = self.get_serializer(thesis)
+        serializer = self.get_serializer(graduation_method)
         return Response(serializer.data)
     
     @action(detail=False, methods=['get'])
     def by_student(self, request):
-        """Obtener tesis de un estudiante"""
+        """Obtener método de graduación de un estudiante"""
         student_id = request.query_params.get('student_id')
         if not student_id:
             return Response(
@@ -1278,12 +1513,12 @@ class ThesisViewSet(viewsets.ModelViewSet):
             )
         
         try:
-            thesis = Thesis.objects.get(student_id=student_id)
-            serializer = self.get_serializer(thesis)
+            graduation_method = GraduationMethod.objects.get(student_id=student_id)
+            serializer = self.get_serializer(graduation_method)
             return Response(serializer.data)
-        except Thesis.DoesNotExist:
+        except GraduationMethod.DoesNotExist:
             return Response(
-                {'error': 'El estudiante no tiene tesis registrada'},
+                {'error': 'El estudiante no tiene método de graduación registrado'},
                 status=status.HTTP_404_NOT_FOUND
             )
 

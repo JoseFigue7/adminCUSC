@@ -286,31 +286,14 @@ const StudentDetail: React.FC = () => {
     }
   };
 
-  // Determinar si un documento es subible o solo para registro físico
+  // Todos los documentos son subibles ahora
   const isDocumentUploadable = (documentType: string): boolean => {
-    // Solo los documentos originales son subibles (excepto fotos físicas que no se suben)
-    const nonUploadableTypes = [
-      'BACHILLERATO_COPIA1',
-      'BACHILLERATO_COPIA2',
-      'NACIMIENTO_COPIA1',
-      'NACIMIENTO_COPIA2',
-      'FOTO_FISICA1',
-      'FOTO_FISICA2'
-    ];
-    return !nonUploadableTypes.includes(documentType);
+    return true;
   };
 
-  // Determinar si un documento es para registro físico
+  // Ya no hay documentos solo para registro físico
   const isPhysicalRecordOnly = (documentType: string): boolean => {
-    const physicalOnlyTypes = [
-      'BACHILLERATO_COPIA1',
-      'BACHILLERATO_COPIA2',
-      'NACIMIENTO_COPIA1',
-      'NACIMIENTO_COPIA2',
-      'FOTO_FISICA1',
-      'FOTO_FISICA2'
-    ];
-    return physicalOnlyTypes.includes(documentType);
+    return false;
   };
 
   if (loading) {
@@ -362,8 +345,8 @@ const StudentDetail: React.FC = () => {
             <Link to={`/careers/${student.career}/pensum`} className="btn btn-secondary btn-large">
               <FiBook /> Ver Pensum
             </Link>
-            <Link to={`/thesis?studentId=${id}`} className="btn btn-info btn-large">
-              <FiBook /> Gestión de Tesis
+            <Link to={`/graduation-method?studentId=${id}`} className="btn btn-info btn-large">
+              <FiBook /> Método de Graduación
             </Link>
           </div>
         </div>

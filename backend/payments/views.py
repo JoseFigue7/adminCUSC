@@ -7,7 +7,6 @@ from django.http import JsonResponse, HttpResponse
 import json
 import logging
 from django.db.models import Q, Sum, Count, Avg
-from django.db.models.functions import TruncDate
 from datetime import datetime, timedelta, date
 from .models import Payment, Scholarship, PaymentConfiguration, PaymentType, StripeWebhookEvent
 from .serializers import PaymentSerializer, ScholarshipSerializer, PaymentConfigurationSerializer, PaymentTypeSerializer, PublicPaymentSerializer
@@ -31,7 +30,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
     
     def get_permissions(self):
         """Permisos específicos por acción"""
-        if self.action in ['list', 'retrieve', 'student_status', 'statistics', 'pending_count', 'pending_transfers']:
+        if self.action in ['list', 'retrieve', 'student_status', 'statistics', 'pending_count', 'pending_transfers', 'my_accounting', 'student_accounting']:
             # Permitir ver a usuarios autenticados
             return [permissions.IsAuthenticated()]
         # Para crear/editar/eliminar/aprobar/rechazar requiere permiso específico
@@ -403,23 +402,13 @@ class PaymentViewSet(viewsets.ModelViewSet):
             tuition_month_count = tuition_month.count()
             
             # Gráfica de pagos por día (últimos 15 días)
-            try:
-                daily_payments = approved_payments.filter(
-                    payment_date__gte=last_15_days_start.date()
-                ).annotate(
-                    date=TruncDate('payment_date')
-                ).values('date').annotate(
-                    total=Sum('amount'),
-                    count=Count('id')
-                ).order_by('date')
-            except Exception:
-                # Fallback: agrupar por fecha manualmente si TruncDate falla
-                daily_payments = approved_payments.filter(
-                    payment_date__gte=last_15_days_start.date()
-                ).values('payment_date').annotate(
-                    total=Sum('amount'),
-                    count=Count('id')
-                ).order_by('payment_date')
+            # payment_date es un DateField, no necesita TruncDate
+            daily_payments = approved_payments.filter(
+                payment_date__gte=last_15_days_start.date()
+            ).values('payment_date').annotate(
+                total=Sum('amount'),
+                count=Count('id')
+            ).order_by('payment_date')
             
             # Gráfica de pagos por método de pago (últimos 30 días)
             method_chart = list(payments_by_method)
@@ -514,6 +503,348 @@ class PaymentViewSet(viewsets.ModelViewSet):
             print(traceback_str)
             return Response(
                 {'error': 'Error al calcular las estadísticas', 'detail': error_detail},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=False, methods=['get'])
+    def my_accounting(self, request):
+        """Obtener contabilidad completa del estudiante asociado al usuario logueado"""
+        from academics.models import CuatrimestreEnrollment
+        from payments.models import PaymentType
+        
+        try:
+            # Buscar estudiante por email del usuario logueado
+            user_email = request.user.email
+            try:
+                student = Student.objects.get(email=user_email, is_active=True)
+            except Student.DoesNotExist:
+                return Response(
+                    {'error': 'No se encontró un estudiante asociado a este usuario'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            except Student.MultipleObjectsReturned:
+                # Si hay múltiples, tomar el primero activo
+                student = Student.objects.filter(email=user_email, is_active=True).first()
+            
+            # Obtener todos los pagos del estudiante ordenados por fecha
+            all_payments = Payment.objects.filter(student=student).select_related(
+                'payment_type', 'career', 'cuatrimestre_enrollment'
+            ).order_by('-payment_date', '-created_at')
+            
+            # Calcular pagos aprobados
+            approved_payments = all_payments.filter(status='APROBADO')
+            total_paid = approved_payments.aggregate(
+                total=Sum('final_amount')
+            )['total'] or Decimal('0.00')
+            
+            # Obtener pagos aprobados por mes/año para identificar meses pagados
+            current_year = datetime.now().year
+            current_month = datetime.now().month
+            
+            # Obtener inscripciones activas del estudiante
+            active_enrollments = CuatrimestreEnrollment.objects.filter(
+                student=student,
+                status__in=['EN_CURSO', 'PENDIENTE_CONFIRMACION', 'PENDIENTE_PAGO']
+            ).order_by('-academic_year', '-cuatrimestre__number')
+            
+            # Calcular deudas pendientes
+            # Buscar tipos de pago mensuales (colegiaturas)
+            monthly_payment_types = PaymentType.objects.filter(
+                is_active=True,
+                requires_month=True
+            )
+            
+            # Calcular meses pagados en el año actual
+            months_paid_this_year = set()
+            for payment in approved_payments.filter(year=current_year):
+                if payment.month:
+                    months_paid_this_year.add(payment.month)
+            
+            # Calcular deudas pendientes del año actual
+            pending_debts = []
+            total_debt = Decimal('0.00')
+            
+            # Para cada mes del año actual hasta el mes actual
+            for month in range(1, current_month + 1):
+                if month not in months_paid_this_year:
+                    # Hay una deuda pendiente para este mes
+                    # Buscar el tipo de pago mensual aplicable
+                    monthly_type = monthly_payment_types.first()
+                    if monthly_type and monthly_type.amount:
+                        # Calcular monto con beca si aplica
+                        base_amount = monthly_type.amount
+                        
+                        # Verificar si el estudiante tiene beca activa
+                        scholarship_discount = Decimal('0.00')
+                        try:
+                            scholarship = student.scholarship
+                            if scholarship and scholarship.status == 'ACTIVA':
+                                # Verificar que la beca esté vigente
+                                today = date.today()
+                                if (scholarship.start_date <= today and 
+                                    (not scholarship.end_date or scholarship.end_date >= today)):
+                                    scholarship_discount = base_amount * (scholarship.percentage / Decimal('100.00'))
+                        except:
+                            pass
+                        
+                        amount_after_scholarship = base_amount - scholarship_discount
+                        
+                        # Calcular mora si aplica
+                        penalty_amount = Decimal('0.00')
+                        if monthly_type.has_penalty:
+                            # Fecha límite sería el último día del mes
+                            import calendar
+                            last_day = calendar.monthrange(current_year, month)[1]
+                            due_date = date(current_year, month, last_day)
+                            today = date.today()
+                            penalty_amount = monthly_type.calculate_penalty(amount_after_scholarship, due_date, today)
+                        
+                        debt_amount = amount_after_scholarship + penalty_amount
+                        total_debt += debt_amount
+                        
+                        pending_debts.append({
+                            'month': month,
+                            'month_display': dict(Payment.MONTHS)[month],
+                            'year': current_year,
+                            'amount': float(debt_amount),
+                            'base_amount': float(amount_after_scholarship),
+                            'penalty_amount': float(penalty_amount),
+                            'payment_type': {
+                                'id': str(monthly_type.id),
+                                'code': monthly_type.code,
+                                'name': monthly_type.name
+                            }
+                        })
+            
+            # Calcular balance (pagos aprobados - deudas pendientes)
+            balance = total_paid - total_debt
+            
+            # Serializar pagos para la respuesta
+            payments_data = []
+            for payment in all_payments:
+                payment_data = {
+                    'id': str(payment.id),
+                    'payment_date': payment.payment_date.isoformat() if payment.payment_date else None,
+                    'payment_method': payment.payment_method,
+                    'payment_method_display': payment.get_payment_method_display(),
+                    'status': payment.status,
+                    'status_display': payment.get_status_display(),
+                    'amount': float(payment.final_amount or payment.amount or 0),
+                    'original_amount': float(payment.original_amount or payment.amount or 0),
+                    'scholarship_discount': float(payment.scholarship_discount_amount or 0),
+                    'penalty_amount': float(payment.penalty_amount or 0),
+                    'month': payment.month,
+                    'month_display': payment.get_month_display() if payment.month else None,
+                    'year': payment.year,
+                    'payment_type': {
+                        'id': str(payment.payment_type.id) if payment.payment_type else None,
+                        'code': payment.payment_type.code if payment.payment_type else None,
+                        'name': payment.payment_type.name if payment.payment_type else None,
+                    } if payment.payment_type else None,
+                    'payment_reference': payment.payment_reference,
+                    'receipt_number': payment.receipt_number,
+                    'transfer_receipt': request.build_absolute_uri(payment.transfer_receipt.url) if payment.transfer_receipt else None,
+                    'transaction_id': payment.transaction_id,
+                    'card_last_four': payment.card_last_four,
+                }
+                payments_data.append(payment_data)
+            
+            return Response({
+                'student': {
+                    'id': str(student.id),
+                    'carnet': student.carnet,
+                    'full_name': student.get_full_name(),
+                    'email': student.email,
+                },
+                'summary': {
+                    'total_paid': float(total_paid),
+                    'total_debt': float(total_debt),
+                    'balance': float(balance),
+                    'total_payments': all_payments.count(),
+                    'approved_payments': approved_payments.count(),
+                    'pending_payments': all_payments.filter(status__in=['PENDIENTE', 'EN_REVISION']).count(),
+                },
+                'pending_debts': pending_debts,
+                'payments': payments_data,
+            })
+            
+        except Exception as e:
+            import traceback
+            error_detail = str(e)
+            traceback_str = traceback.format_exc()
+            print(f"Error in my_accounting endpoint: {error_detail}")
+            print(traceback_str)
+            return Response(
+                {'error': 'Error al obtener la contabilidad', 'detail': error_detail},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=False, methods=['get'], url_path='student_accounting/(?P<student_id>[^/.]+)')
+    def student_accounting(self, request, student_id=None):
+        """Obtener contabilidad completa de un estudiante específico (para administradores)"""
+        from academics.models import CuatrimestreEnrollment
+        from payments.models import PaymentType
+        
+        try:
+            # Buscar estudiante por ID
+            try:
+                student = Student.objects.get(id=student_id, is_active=True)
+            except Student.DoesNotExist:
+                return Response(
+                    {'error': 'No se encontró el estudiante'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Obtener todos los pagos del estudiante ordenados por fecha
+            all_payments = Payment.objects.filter(student=student).select_related(
+                'payment_type', 'career', 'cuatrimestre_enrollment'
+            ).order_by('-payment_date', '-created_at')
+            
+            # Calcular pagos aprobados
+            approved_payments = all_payments.filter(status='APROBADO')
+            total_paid = approved_payments.aggregate(
+                total=Sum('final_amount')
+            )['total'] or Decimal('0.00')
+            
+            # Obtener pagos aprobados por mes/año para identificar meses pagados
+            current_year = datetime.now().year
+            current_month = datetime.now().month
+            
+            # Obtener inscripciones activas del estudiante
+            active_enrollments = CuatrimestreEnrollment.objects.filter(
+                student=student,
+                status__in=['EN_CURSO', 'PENDIENTE_CONFIRMACION', 'PENDIENTE_PAGO']
+            ).order_by('-academic_year', '-cuatrimestre__number')
+            
+            # Calcular deudas pendientes
+            # Buscar tipos de pago mensuales (colegiaturas)
+            monthly_payment_types = PaymentType.objects.filter(
+                is_active=True,
+                requires_month=True
+            )
+            
+            # Calcular meses pagados en el año actual
+            months_paid_this_year = set()
+            for payment in approved_payments.filter(year=current_year):
+                if payment.month:
+                    months_paid_this_year.add(payment.month)
+            
+            # Calcular deudas pendientes del año actual
+            pending_debts = []
+            total_debt = Decimal('0.00')
+            
+            # Para cada mes del año actual hasta el mes actual
+            for month in range(1, current_month + 1):
+                if month not in months_paid_this_year:
+                    # Hay una deuda pendiente para este mes
+                    # Buscar el tipo de pago mensual aplicable
+                    monthly_type = monthly_payment_types.first()
+                    if monthly_type and monthly_type.amount:
+                        # Calcular monto con beca si aplica
+                        base_amount = monthly_type.amount
+                        
+                        # Verificar si el estudiante tiene beca activa
+                        scholarship_discount = Decimal('0.00')
+                        try:
+                            scholarship = student.scholarship
+                            if scholarship and scholarship.status == 'ACTIVA':
+                                # Verificar que la beca esté vigente
+                                today = date.today()
+                                if (scholarship.start_date <= today and 
+                                    (not scholarship.end_date or scholarship.end_date >= today)):
+                                    scholarship_discount = base_amount * (scholarship.percentage / Decimal('100.00'))
+                        except:
+                            pass
+                        
+                        amount_after_scholarship = base_amount - scholarship_discount
+                        
+                        # Calcular mora si aplica
+                        penalty_amount = Decimal('0.00')
+                        if monthly_type.has_penalty:
+                            # Fecha límite sería el último día del mes
+                            import calendar
+                            last_day = calendar.monthrange(current_year, month)[1]
+                            due_date = date(current_year, month, last_day)
+                            today = date.today()
+                            penalty_amount = monthly_type.calculate_penalty(amount_after_scholarship, due_date, today)
+                        
+                        debt_amount = amount_after_scholarship + penalty_amount
+                        total_debt += debt_amount
+                        
+                        pending_debts.append({
+                            'month': month,
+                            'month_display': dict(Payment.MONTHS)[month],
+                            'year': current_year,
+                            'amount': float(debt_amount),
+                            'base_amount': float(amount_after_scholarship),
+                            'penalty_amount': float(penalty_amount),
+                            'payment_type': {
+                                'id': str(monthly_type.id),
+                                'code': monthly_type.code,
+                                'name': monthly_type.name
+                            }
+                        })
+            
+            # Calcular balance (pagos aprobados - deudas pendientes)
+            balance = total_paid - total_debt
+            
+            # Serializar pagos para la respuesta
+            payments_data = []
+            for payment in all_payments:
+                payment_data = {
+                    'id': str(payment.id),
+                    'payment_date': payment.payment_date.isoformat() if payment.payment_date else None,
+                    'payment_method': payment.payment_method,
+                    'payment_method_display': payment.get_payment_method_display(),
+                    'status': payment.status,
+                    'status_display': payment.get_status_display(),
+                    'amount': float(payment.final_amount or payment.amount or 0),
+                    'original_amount': float(payment.original_amount or payment.amount or 0),
+                    'scholarship_discount': float(payment.scholarship_discount_amount or 0),
+                    'penalty_amount': float(payment.penalty_amount or 0),
+                    'month': payment.month,
+                    'month_display': payment.get_month_display() if payment.month else None,
+                    'year': payment.year,
+                    'payment_type': {
+                        'id': str(payment.payment_type.id) if payment.payment_type else None,
+                        'code': payment.payment_type.code if payment.payment_type else None,
+                        'name': payment.payment_type.name if payment.payment_type else None,
+                    } if payment.payment_type else None,
+                    'payment_reference': payment.payment_reference,
+                    'receipt_number': payment.receipt_number,
+                    'transfer_receipt': request.build_absolute_uri(payment.transfer_receipt.url) if payment.transfer_receipt else None,
+                    'transaction_id': payment.transaction_id,
+                    'card_last_four': payment.card_last_four,
+                }
+                payments_data.append(payment_data)
+            
+            return Response({
+                'student': {
+                    'id': str(student.id),
+                    'carnet': student.carnet,
+                    'full_name': student.get_full_name(),
+                    'email': student.email,
+                },
+                'summary': {
+                    'total_paid': float(total_paid),
+                    'total_debt': float(total_debt),
+                    'balance': float(balance),
+                    'total_payments': all_payments.count(),
+                    'approved_payments': approved_payments.count(),
+                    'pending_payments': all_payments.filter(status__in=['PENDIENTE', 'EN_REVISION']).count(),
+                },
+                'pending_debts': pending_debts,
+                'payments': payments_data,
+            })
+            
+        except Exception as e:
+            import traceback
+            error_detail = str(e)
+            traceback_str = traceback.format_exc()
+            print(f"Error in student_accounting endpoint: {error_detail}")
+            print(traceback_str)
+            return Response(
+                {'error': 'Error al obtener la contabilidad del estudiante', 'detail': error_detail},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 

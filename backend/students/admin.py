@@ -37,7 +37,7 @@ class StudentAdmin(admin.ModelAdmin):
         'carnet_display', 'full_name_display', 'email', 'career_link', 
         'status_badge', 'scholarship_badge', 'enrollment_date'
     ]
-    list_filter = ['is_active', 'career', 'scholarship_type', 'pensum_closed', 'thesis_started', 'enrollment_date', 'gender', 'birth_country']
+    list_filter = ['is_active', 'career', 'scholarship_type', 'pensum_closed', 'graduation_method_started', 'enrollment_date', 'gender', 'birth_country']
     search_fields = ['carnet', 'first_name', 'first_last_name', 'second_last_name', 'email', 'curp']
     readonly_fields = [
         'id', 'carnet', 'created_at', 'updated_at', 
@@ -76,7 +76,7 @@ class StudentAdmin(admin.ModelAdmin):
             'fields': (
                 'career',
                 'enrollment_date',
-                ('pensum_closed', 'thesis_started'),
+                ('pensum_closed', 'graduation_method_started'),
                 'is_active',
             ),
         }),

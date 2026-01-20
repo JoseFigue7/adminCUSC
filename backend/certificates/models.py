@@ -294,8 +294,8 @@ class UniversityTitle(models.Model):
         default=False,
         null=True,
         blank=True,
-        verbose_name='Tesis aprobada',
-        help_text='Indica si la tesis fue aprobada (si aplica)'
+        verbose_name='Método de graduación aprobado',
+        help_text='Indica si el método de graduación fue aprobado (si aplica)'
     )
     
     average_grade = models.DecimalField(
@@ -381,9 +381,9 @@ class UniversityTitle(models.Model):
         if approved_required_courses < total_required_courses:
             return False
         
-        # Si hay tesis, verificar que esté aprobada
-        if hasattr(self.student, 'thesis') and self.student.thesis:
-            if self.student.thesis.status != 'APROBADA':
+        # Si hay método de graduación, verificar que esté aprobado
+        if hasattr(self.student, 'graduation_method') and self.student.graduation_method:
+            if self.student.graduation_method.status != 'APROBADA':
                 return False
         
         # Actualizar campos

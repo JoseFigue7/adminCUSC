@@ -165,7 +165,7 @@
             </div>
             {% if title.thesis_approved %}
             <div class="info-row">
-                <span class="info-label">Tesis:</span> Aprobada
+                <span class="info-label">Método de Graduación:</span> Aprobado
             </div>
             {% endif %}
         </div>
@@ -175,7 +175,7 @@
             <div class="requirement-item">Pensum completado</div>
             <div class="requirement-item">Todos los cursos requeridos aprobados</div>
             {% if title.thesis_approved %}
-            <div class="requirement-item">Tesis aprobada</div>
+            <div class="requirement-item">Método de graduación aprobado</div>
             {% endif %}
             {% if title.average_grade %}
             <div class="requirement-item">Promedio general: {{ title.average_grade|floatformat:2 }}</div>

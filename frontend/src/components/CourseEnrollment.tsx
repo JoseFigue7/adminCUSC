@@ -11,7 +11,7 @@ import {
 import { 
   FiBook, FiCheckCircle, FiXCircle, FiPlus, FiArrowLeft, 
   FiSearch, FiFilter, FiClock, FiAlertTriangle, FiDollarSign,
-  FiDownload, FiInfo, FiX
+  FiDownload, FiInfo, FiX, FiLoader
 } from '../utils/icons';
 import { useToast } from '../hooks/useToast';
 import { getAcademicPeriod, getCuatrimestresByPeriod, getPeriodName } from '../utils/academicPeriod';
@@ -60,7 +60,7 @@ const CourseEnrollment: React.FC = () => {
   const navigate = useNavigate();
   const studentId = searchParams.get('studentId');
   const cuatrimestreEnrollmentId = searchParams.get('cuatrimestreEnrollmentId');
-  const { success, error } = useToast();
+  const { success, error, warning } = useToast();
 
   const [student, setStudent] = useState<Student | null>(null);
   const [cuatrimestreEnrollment, setCuatrimestreEnrollment] = useState<any>(null);
@@ -71,12 +71,8 @@ const CourseEnrollment: React.FC = () => {
   const [filterCuatrimestre, setFilterCuatrimestre] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
   const [enrolling, setEnrolling] = useState(false);
-  const [tuitionData, setTuitionData] = useState<any>(null);
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showBoletaModal, setShowBoletaModal] = useState(false);
   const [boletaUrl, setBoletaUrl] = useState<string | null>(null);
-  const [paymentOption, setPaymentOption] = useState<'monthly' | 'full'>('monthly');
-  const [loadingTuition, setLoadingTuition] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
@@ -85,15 +81,6 @@ const CourseEnrollment: React.FC = () => {
     }
   }, [studentId, cuatrimestreEnrollmentId]);
 
-  useEffect(() => {
-    // Cargar datos de colegiatura cuando hay cursos asignados y el estado permite confirmar
-    if (cuatrimestreEnrollmentId && cuatrimestreEnrollment && 
-        (cuatrimestreEnrollment.status === 'PENDIENTE_PAGO' || 
-         cuatrimestreEnrollment.status === 'PENDIENTE_CONFIRMACION') && 
-        enrollments.length > 0) {
-      loadTuitionData();
-    }
-  }, [cuatrimestreEnrollmentId, cuatrimestreEnrollment?.status, enrollments.length]);
 
   const loadData = async () => {
     if (!studentId && !cuatrimestreEnrollmentId) {
@@ -284,10 +271,23 @@ const CourseEnrollment: React.FC = () => {
         // Recargar datos para obtener el nuevo estado
         await loadData();
         
-        // Generar y mostrar boleta de preview
-        await handlePreviewBoleta();
+        // Después de pre-asignar, mostrar la hoja de asignación para descargar/ver
+        // NO confirmar inmediatamente - el usuario debe revisar y confirmar después
+        try {
+          // Generar y mostrar la boleta de asignación (hoja con cursos, precios y horarios)
+          const response = await academicsApi.previewBoleta(cuatrimestreEnrollmentId);
+          const blob = new Blob([response.data], { type: 'application/pdf' });
+          const url = window.URL.createObjectURL(blob);
+          setBoletaUrl(url);
+          setShowBoletaModal(true);
+          
+          success('Cursos pre-asignados exitosamente. Por favor, revise la hoja de asignación y confirme cuando esté listo.');
+        } catch (boletaErr: any) {
+          console.error('Error generating boleta:', boletaErr);
+          // Si falla la generación de la boleta, mostrar mensaje pero continuar
+          warning('Los cursos se pre-asignaron, pero no se pudo generar la hoja de asignación. Puede revisarla más tarde.');
+        }
         
-        success(`Se pre-asignaron ${selectedCourses.size} curso(s). Revise la boleta antes de confirmar.`);
       } else if (studentId) {
         // Modo normal: matricular sin cuatrimestre enrollment
         await Promise.all(
@@ -363,26 +363,6 @@ const CourseEnrollment: React.FC = () => {
     }
   };
 
-  const loadTuitionData = async () => {
-    if (!cuatrimestreEnrollmentId) return;
-    
-    setLoadingTuition(true);
-    try {
-      const res = await academicsApi.calculateTuition(cuatrimestreEnrollmentId);
-      setTuitionData(res.data);
-    } catch (err: any) {
-      console.error('Error loading tuition:', err);
-    } finally {
-      setLoadingTuition(false);
-    }
-  };
-
-  useEffect(() => {
-    if (cuatrimestreEnrollmentId && cuatrimestreEnrollment && 
-        cuatrimestreEnrollment.status === 'PENDIENTE_CONFIRMACION' && enrollments.length > 0) {
-      loadTuitionData();
-    }
-  }, [cuatrimestreEnrollmentId, cuatrimestreEnrollment, enrollments.length]);
 
   const handleDownloadAssignmentSheet = async () => {
     if (!cuatrimestreEnrollmentId) return;
@@ -402,7 +382,15 @@ const CourseEnrollment: React.FC = () => {
       success('Hoja de asignación descargada');
     } catch (err: any) {
       console.error('Error downloading assignment sheet:', err);
-      error('Error al descargar la hoja de asignación');
+      const errorMessage = err.response?.data?.error || 
+                          err.response?.data?.message || 
+                          'Error al descargar la hoja de asignación';
+      // Si el error es que no hay cursos asignados, es normal cuando aún no se han pre-asignado
+      if (errorMessage.includes('No hay cursos asignados')) {
+        warning('Primero debe pre-asignar los cursos antes de descargar la hoja de asignación');
+      } else {
+        error(errorMessage);
+      }
     }
   };
 
@@ -435,22 +423,125 @@ const CourseEnrollment: React.FC = () => {
   const handleConfirmAssignment = async () => {
     if (!cuatrimestreEnrollmentId) return;
     
-    if (!window.confirm(`¿Está seguro de confirmar la asignación? Una vez confirmada, no se podrá modificar para este cuatrimestre.`)) {
-      return;
-    }
-    
     setConfirming(true);
     try {
-      await academicsApi.confirmCourseAssignment(cuatrimestreEnrollmentId);
+      // Confirmar la asignación (el backend usa 'monthly' por defecto para payment_option)
+      // Los pagos se pueden registrar después en el módulo de pagos con cualquier modalidad
+      const confirmResult = await academicsApi.confirmCourseAssignment(cuatrimestreEnrollmentId, 'monthly');
       success('Asignación confirmada exitosamente. El plan de pagos ha sido generado.');
+      
+      // Cerrar modal de boleta
       setShowBoletaModal(false);
-      setShowConfirmModal(false);
       setBoletaUrl(null);
       setSelectedCourses(new Set());
+      
+      // Recargar datos
       await loadData();
-      // Recargar para obtener el nuevo estado
       const res = await academicsApi.getCuatrimestreEnrollment(cuatrimestreEnrollmentId);
       setCuatrimestreEnrollment(res.data);
+      
+      // Verificar si se crearon pagos
+      const paymentsCreated = confirmResult?.data?.payments_created || [];
+      
+      // Descargar automáticamente el talonario de pagos
+      // Solo si el estudiante NO está exonerado Y se crearon pagos
+      if (!res.data.is_enrollment_fee_exempt && paymentsCreated.length > 0) {
+        // Intentar obtener y descargar el talonario con retry (hasta 3 intentos con delay creciente)
+        let voucherSuccess = false;
+        let lastError: any = null;
+        
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            // Delay creciente: 500ms, 1000ms, 2000ms
+            const delay = 500 * Math.pow(2, attempt - 1);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            
+            console.log(`Intento ${attempt} de obtener talonario de pagos...`);
+            const voucherResponse = await academicsApi.getPaymentVoucher(cuatrimestreEnrollmentId);
+            const blob = new Blob([voucherResponse.data], { type: 'application/pdf' });
+            const url = window.URL.createObjectURL(blob);
+            
+            // Descargar automáticamente el talonario
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `talonario_pagos_${cuatrimestreEnrollmentId}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+            
+            voucherSuccess = true;
+            success('Talonario de pagos descargado exitosamente.');
+            break;
+          } catch (voucherErr: any) {
+            lastError = voucherErr;
+            console.error(`Error en intento ${attempt} de generar talonario:`, voucherErr);
+            
+            // Leer el error del Blob si es necesario
+            let errorData = voucherErr.response?.data;
+            let errorMsg = 'Error al generar el talonario de pagos';
+            
+            if (errorData instanceof Blob) {
+              try {
+                const text = await errorData.text();
+                errorData = JSON.parse(text);
+                errorMsg = errorData.error || errorData.message || errorMsg;
+              } catch (e) {
+                console.error('Error parsing error response:', e);
+              }
+            } else if (typeof errorData === 'object' && errorData !== null) {
+              errorMsg = errorData.error || errorData.message || errorMsg;
+            }
+            
+            console.error('Error response data:', errorData);
+            console.error('Error message:', errorMsg);
+            console.error('Error response status:', voucherErr.response?.status);
+            
+            // Si es un error 500 o de red, continuar con el siguiente intento
+            if (voucherErr.response?.status >= 500 || !voucherErr.response) {
+              continue;
+            }
+            
+            // Si es un error 400 y no es por timing, no reintentar
+            if (voucherErr.response?.status === 400) {
+              if (errorMsg.includes('exonerado')) {
+                success('Asignación confirmada. El estudiante está exonerado de pagos de colegiatura.');
+                voucherSuccess = true; // No es un error real, solo información
+                break;
+              } else if (errorMsg.includes('no tienen costo') || errorMsg.includes('no requiere talonario')) {
+                success('Asignación confirmada. Los cursos asignados no tienen costo.');
+                voucherSuccess = true; // No es un error real, solo información
+                break;
+              } else if (errorMsg.includes('Debe confirmar la asignación') || errorMsg.includes('No hay pagos generados')) {
+                // Posible problema de timing, continuar con el siguiente intento
+                continue;
+              } else {
+                // Otro tipo de error 400 - no reintentar
+                break;
+              }
+            }
+          }
+        }
+        
+        // Si después de todos los intentos no se pudo obtener el talonario
+        if (!voucherSuccess && lastError) {
+          const errorMsg = lastError.response?.data?.error || lastError.response?.data?.message || 'Error al generar el talonario de pagos';
+          console.warn('No se pudo obtener el talonario después de 3 intentos:', {
+            error: errorMsg,
+            status: res.data.status,
+            is_exempt: res.data.is_enrollment_fee_exempt,
+            payments_created: confirmResult?.data?.payments_created || []
+          });
+          warning(`No se pudo descargar el talonario: ${errorMsg}. Puede descargarlo más tarde desde la sección de pagos.`);
+        }
+      } else {
+        // No se generaron pagos - puede ser porque está exonerado o porque los cursos no tienen costo
+        if (res.data.is_enrollment_fee_exempt) {
+          success('Asignación confirmada. El estudiante está exonerado de pagos de colegiatura.');
+        } else if (paymentsCreated.length === 0) {
+          success('Asignación confirmada. Los cursos asignados no tienen costo asignado.');
+        }
+      }
     } catch (err: any) {
       console.error('Error confirming assignment:', err);
       error(err.response?.data?.error || 'Error al confirmar la asignación');
@@ -537,34 +628,48 @@ const CourseEnrollment: React.FC = () => {
             >
               <FiArrowLeft /> Volver
             </button>
-            {selectedCourses.size > 0 && (
-              <>
-                {cuatrimestreEnrollmentId && selectedCourses.size > 7 && (
-                  <div className="warning-message" style={{ 
-                    background: '#fed7d7', 
-                    color: '#742a2a', 
-                    padding: '0.5rem 1rem', 
-                    borderRadius: '4px',
-                    marginRight: '1rem'
-                  }}>
-                    <FiAlertTriangle style={{ marginRight: '0.5rem' }} />
-                    Máximo 7 cursos permitidos
-                  </div>
-                )}
-                <button 
-                  onClick={handleEnroll} 
-                  className="btn btn-primary btn-large"
-                  disabled={enrolling || (cuatrimestreEnrollmentId && selectedCourses.size > 7)}
-                >
-                  {enrolling ? (
-                    <>Cargando...</>
-                  ) : (
-                    <>
-                      <FiPlus /> Matricular {selectedCourses.size} curso(s)
-                    </>
+            {/* Solo mostrar botón de matricular si el estado permite edición */}
+            {cuatrimestreEnrollmentId && cuatrimestreEnrollment && 
+             (cuatrimestreEnrollment.status === 'EN_CURSO' || cuatrimestreEnrollment.status === 'FINALIZADO') ? (
+              <div style={{ 
+                padding: '0.5rem 1rem', 
+                borderRadius: '4px',
+                background: '#dbeafe',
+                color: '#1e40af'
+              }}>
+                <FiInfo style={{ marginRight: '0.5rem' }} />
+                Asignación confirmada - Solo visualización
+              </div>
+            ) : (
+              selectedCourses.size > 0 && (
+                <>
+                  {cuatrimestreEnrollmentId && selectedCourses.size > 7 && (
+                    <div className="warning-message" style={{ 
+                      background: '#fed7d7', 
+                      color: '#742a2a', 
+                      padding: '0.5rem 1rem', 
+                      borderRadius: '4px',
+                      marginRight: '1rem'
+                    }}>
+                      <FiAlertTriangle style={{ marginRight: '0.5rem' }} />
+                      Máximo 7 cursos permitidos
+                    </div>
                   )}
-                </button>
-              </>
+                  <button 
+                    onClick={handleEnroll} 
+                    className="btn btn-primary btn-large"
+                    disabled={enrolling || (cuatrimestreEnrollmentId && selectedCourses.size > 7)}
+                  >
+                    {enrolling ? (
+                      <>Cargando...</>
+                    ) : (
+                      <>
+                        <FiPlus /> Matricular {selectedCourses.size} curso(s)
+                      </>
+                    )}
+                  </button>
+                </>
+              )
             )}
           </div>
         </div>
@@ -580,6 +685,9 @@ const CourseEnrollment: React.FC = () => {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="search-input"
+              disabled={cuatrimestreEnrollmentId && cuatrimestreEnrollment && 
+                       (cuatrimestreEnrollment.status === 'EN_CURSO' || 
+                        cuatrimestreEnrollment.status === 'FINALIZADO')}
             />
           </div>
           {!cuatrimestreEnrollment && (
@@ -598,11 +706,20 @@ const CourseEnrollment: React.FC = () => {
             </div>
           )}
           <div className="stats-badge">
-            {availableCourses.length} curso(s) disponible(s)
-            {cuatrimestreEnrollmentId && (
-              <span style={{ marginLeft: '1rem', fontSize: '0.875rem', color: '#6b7280' }}>
-                | Máximo 7 cursos | {selectedCourses.size} seleccionado(s)
+            {cuatrimestreEnrollmentId && cuatrimestreEnrollment && 
+             (cuatrimestreEnrollment.status === 'EN_CURSO' || cuatrimestreEnrollment.status === 'FINALIZADO') ? (
+              <span style={{ color: '#059669', fontWeight: '600' }}>
+                {enrollments.length} curso(s) matriculado(s) - Asignación confirmada
               </span>
+            ) : (
+              <>
+                {availableCourses.length} curso(s) disponible(s)
+                {cuatrimestreEnrollmentId && (
+                  <span style={{ marginLeft: '1rem', fontSize: '0.875rem', color: '#6b7280' }}>
+                    | Máximo 7 cursos | {selectedCourses.size} seleccionado(s)
+                  </span>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -612,12 +729,17 @@ const CourseEnrollment: React.FC = () => {
             {availableCourses.map((course) => {
               const canEnroll = canEnrollInCourse(course);
               const isSelected = selectedCourses.has(course.id);
+              // Deshabilitar selección si el estado es EN_CURSO o FINALIZADO
+              const isReadOnly = cuatrimestreEnrollmentId && cuatrimestreEnrollment && 
+                                (cuatrimestreEnrollment.status === 'EN_CURSO' || 
+                                 cuatrimestreEnrollment.status === 'FINALIZADO');
               
               return (
                 <div
                   key={course.id}
-                  className={`course-card ${isSelected ? 'selected' : ''} ${!canEnroll ? 'disabled' : ''}`}
-                  onClick={() => canEnroll && toggleCourseSelection(course.id)}
+                  className={`course-card ${isSelected ? 'selected' : ''} ${!canEnroll || isReadOnly ? 'disabled' : ''}`}
+                  onClick={() => !isReadOnly && canEnroll && toggleCourseSelection(course.id)}
+                  style={{ cursor: isReadOnly ? 'default' : canEnroll ? 'pointer' : 'not-allowed' }}
                 >
                   <div className="course-header">
                     <div className="course-code">{course.code}</div>
@@ -698,66 +820,6 @@ const CourseEnrollment: React.FC = () => {
             ))}
           </div>
           
-          {/* Mostrar información de colegiatura y opciones de confirmación */}
-          {cuatrimestreEnrollmentId && cuatrimestreEnrollment && 
-           (cuatrimestreEnrollment.status === 'PENDIENTE_PAGO' || 
-            cuatrimestreEnrollment.status === 'PENDIENTE_CONFIRMACION') && (
-            <div style={{ marginTop: '1.5rem', padding: '1rem', backgroundColor: '#f9fafb', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
-              {loadingTuition ? (
-                <div style={{ textAlign: 'center', padding: '1rem' }}>
-                  <div className="spinner" style={{ margin: '0 auto' }}></div>
-                  <p>Cargando información de colegiatura...</p>
-                </div>
-              ) : tuitionData ? (
-                <>
-                  <h3 style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center' }}>
-                    <FiDollarSign style={{ marginRight: '0.5rem' }} />
-                    Información de Colegiatura
-                  </h3>
-                  <div style={{ marginBottom: '1rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                      <strong>Costo total de colegiatura:</strong>
-                      <strong style={{ fontSize: '1.25rem', color: '#059669' }}>
-                        ${parseFloat(tuitionData.total_tuition).toFixed(2)}
-                      </strong>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#6b7280' }}>
-                      <span>Pago mensual (4 meses):</span>
-                      <span>${parseFloat(tuitionData.payment_plan.monthly_payment).toFixed(2)}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#6b7280' }}>
-                      <span>Pago completo con descuento (10%):</span>
-                      <span>${parseFloat(tuitionData.payment_plan.full_payment_total).toFixed(2)} 
-                        <span style={{ color: '#059669', marginLeft: '0.5rem' }}>
-                          (Ahorra ${parseFloat(tuitionData.payment_plan.full_payment_discount).toFixed(2)})
-                        </span>
-                      </span>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                    <button
-                      onClick={handleDownloadAssignmentSheet}
-                      className="btn btn-secondary"
-                    >
-                      <FiDownload /> Descargar Hoja de Asignación
-                    </button>
-                    <button
-                      onClick={() => setShowConfirmModal(true)}
-                      className="btn btn-primary"
-                    >
-                      <FiCheckCircle /> Confirmar Asignación
-                    </button>
-                    <button
-                      onClick={() => navigate(`/cuatrimestre-enrollments?studentId=${student?.id}`)}
-                      className="btn btn-secondary"
-                    >
-                      <FiArrowLeft /> Volver Atrás
-                    </button>
-                  </div>
-                </>
-              ) : null}
-            </div>
-          )}
         </div>
       )}
 
@@ -800,11 +862,22 @@ const CourseEnrollment: React.FC = () => {
                 <FiDownload /> Imprimir Boleta
               </button>
               <button 
-                onClick={handleConfirmAssignment} 
+                onClick={async () => {
+                  // Primero descargar la hoja de asignación
+                  await handleDownloadAssignmentSheet();
+                  // Cerrar el modal de boleta
+                  setShowBoletaModal(false);
+                  // Confirmar la asignación directamente (sin opción de pago)
+                  await handleConfirmAssignment();
+                }}
                 className="btn btn-primary"
                 disabled={confirming}
               >
-                {confirming ? 'Confirmando...' : (
+                {confirming ? (
+                  <>
+                    <FiLoader className="spinning" /> Confirmando...
+                  </>
+                ) : (
                   <>
                     <FiCheckCircle /> Confirmar Asignación
                   </>
@@ -815,86 +888,6 @@ const CourseEnrollment: React.FC = () => {
         </div>
       )}
 
-      {/* Modal de confirmación de asignación */}
-      {showConfirmModal && tuitionData && (
-        <div className="modal-overlay" onClick={() => setShowConfirmModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '600px' }}>
-            <div className="modal-header">
-              <h2>Confirmar Asignación de Cursos</h2>
-              <button className="modal-close" onClick={() => setShowConfirmModal(false)}>
-                <FiX />
-              </button>
-            </div>
-            <div style={{ padding: '1.5rem' }}>
-              <div style={{ marginBottom: '1.5rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem', padding: '1rem', backgroundColor: '#fef3c7', borderRadius: '8px' }}>
-                  <FiInfo style={{ marginRight: '0.5rem', color: '#d97706' }} />
-                  <span style={{ color: '#92400e' }}>
-                    Una vez confirmada, la asignación no podrá modificarse para este cuatrimestre.
-                  </span>
-                </div>
-                <h3 style={{ marginBottom: '1rem' }}>Seleccione la opción de pago:</h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', padding: '1rem', border: '2px solid #e5e7eb', borderRadius: '8px', cursor: 'pointer' }}
-                    className={paymentOption === 'monthly' ? 'selected' : ''}>
-                    <input
-                      type="radio"
-                      name="paymentOption"
-                      value="monthly"
-                      checked={paymentOption === 'monthly'}
-                      onChange={(e) => setPaymentOption(e.target.value as 'monthly' | 'full')}
-                      style={{ marginRight: '0.75rem' }}
-                    />
-                    <div style={{ flex: 1 }}>
-                      <strong>Pago Mensual (4 pagos)</strong>
-                      <div style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.25rem' }}>
-                        ${parseFloat(tuitionData.payment_plan.monthly_payment).toFixed(2)} por mes
-                      </div>
-                    </div>
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', padding: '1rem', border: '2px solid #e5e7eb', borderRadius: '8px', cursor: 'pointer' }}
-                    className={paymentOption === 'full' ? 'selected' : ''}>
-                    <input
-                      type="radio"
-                      name="paymentOption"
-                      value="full"
-                      checked={paymentOption === 'full'}
-                      onChange={(e) => setPaymentOption(e.target.value as 'monthly' | 'full')}
-                      style={{ marginRight: '0.75rem' }}
-                    />
-                    <div style={{ flex: 1 }}>
-                      <strong>Pago Completo (10% descuento)</strong>
-                      <div style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.25rem' }}>
-                        ${parseFloat(tuitionData.payment_plan.full_payment_total).toFixed(2)} 
-                        <span style={{ color: '#059669', marginLeft: '0.5rem' }}>
-                          (Ahorra ${parseFloat(tuitionData.payment_plan.full_payment_discount).toFixed(2)})
-                        </span>
-                      </div>
-                    </div>
-                  </label>
-                </div>
-              </div>
-              <div className="modal-actions">
-                <button 
-                  type="button" 
-                  onClick={() => setShowConfirmModal(false)} 
-                  className="btn btn-secondary"
-                  disabled={confirming}
-                >
-                  Cancelar
-                </button>
-                <button 
-                  onClick={handleConfirmAssignment} 
-                  className="btn btn-primary"
-                  disabled={confirming}
-                >
-                  {confirming ? 'Confirmando...' : 'Confirmar Asignación'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

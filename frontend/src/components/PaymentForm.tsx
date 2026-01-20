@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getStudents, createPayment, uploadPaymentReceipt } from '../services/api';
-import { FiDollarSign, FiSave, FiX, FiLoader, FiUpload } from '../utils/icons';
+import { getStudents, createPayment, uploadPaymentReceipt, getPaymentTypes } from '../services/api';
+import { FiDollarSign, FiSave, FiX, FiLoader, FiUpload, FiSearch } from '../utils/icons';
 import { useToast } from '../hooks/useToast';
 import './shared.css';
 import './PaymentForm.css';
@@ -14,12 +14,26 @@ interface Student {
   full_name?: string;
 }
 
+interface PaymentType {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+  amount?: number;
+  requires_career?: boolean;
+  requires_semester?: boolean;
+  requires_month?: boolean;
+  requires_year?: boolean;
+  requires_quantity?: boolean;
+}
+
 const PaymentForm: React.FC = () => {
   const navigate = useNavigate();
   const { success, error } = useToast();
 
   const [payment, setPayment] = useState({
     student: '',
+    payment_type: '',
     payment_method: 'TRANSFERENCIA',
     amount: '',
     month: new Date().getMonth() + 1,
@@ -30,10 +44,16 @@ const PaymentForm: React.FC = () => {
   });
 
   const [students, setStudents] = useState<Student[]>([]);
+  const [paymentTypes, setPaymentTypes] = useState<PaymentType[]>([]);
+  const [studentSearch, setStudentSearch] = useState('');
+  const [filteredStudents, setFilteredStudents] = useState<Student[]>([]);
+  const [showStudentDropdown, setShowStudentDropdown] = useState(false);
+  const [selectedPaymentType, setSelectedPaymentType] = useState<PaymentType | null>(null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const studentSearchRef = useRef<HTMLDivElement>(null);
 
   const months = [
     { value: 1, label: 'Enero' },
@@ -52,12 +72,55 @@ const PaymentForm: React.FC = () => {
 
   useEffect(() => {
     loadStudents();
+    loadPaymentTypes();
+  }, []);
+
+  useEffect(() => {
+    // Filtrar estudiantes según búsqueda
+    if (studentSearch.trim()) {
+      const searchTerm = studentSearch.toLowerCase();
+      const filtered = students.filter(student => 
+        student.carnet.toLowerCase().includes(searchTerm) ||
+        student.first_name.toLowerCase().includes(searchTerm) ||
+        student.last_name.toLowerCase().includes(searchTerm) ||
+        `${student.carnet} - ${student.first_name} ${student.last_name}`.toLowerCase().includes(searchTerm)
+      );
+      setFilteredStudents(filtered);
+      setShowStudentDropdown(true);
+    } else {
+      setFilteredStudents([]);
+      setShowStudentDropdown(false);
+    }
+  }, [studentSearch, students]);
+
+  // Sincronizar el campo de búsqueda con el estudiante seleccionado
+  useEffect(() => {
+    if (payment.student) {
+      const student = students.find(s => s.id === payment.student);
+      if (student && studentSearch !== `${student.carnet} - ${student.first_name} ${student.last_name}`) {
+        setStudentSearch(`${student.carnet} - ${student.first_name} ${student.last_name}`);
+      }
+    }
+  }, [payment.student, students]);
+
+  useEffect(() => {
+    // Cerrar dropdown al hacer click fuera
+    const handleClickOutside = (event: MouseEvent) => {
+      if (studentSearchRef.current && !studentSearchRef.current.contains(event.target as Node)) {
+        setShowStudentDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
   }, []);
 
   const loadStudents = async () => {
     setLoadingData(true);
     try {
-      const response = await getStudents();
+      const response = await getStudents({ page_size: 1000, is_active: true });
       const data = response.data.results || response.data;
       setStudents(data);
     } catch (err) {
@@ -68,20 +131,64 @@ const PaymentForm: React.FC = () => {
     }
   };
 
+  const loadPaymentTypes = async () => {
+    try {
+      const response = await getPaymentTypes();
+      const data = response.data.results || response.data;
+      setPaymentTypes(data);
+    } catch (err) {
+      console.error('Error loading payment types:', err);
+      error('Error al cargar tipos de pago');
+    }
+  };
+
+  const handleStudentSelect = (student: Student) => {
+    setPayment({ ...payment, student: student.id });
+    setStudentSearch(`${student.carnet} - ${student.first_name} ${student.last_name}`);
+    setShowStudentDropdown(false);
+    setErrors({ ...errors, student: '' });
+  };
+
+  const handlePaymentTypeChange = (paymentTypeId: string) => {
+    const paymentType = paymentTypes.find(pt => pt.id === paymentTypeId);
+    setSelectedPaymentType(paymentType || null);
+    setPayment({ ...payment, payment_type: paymentTypeId });
+    
+    // Si el tipo de pago tiene un monto fijo, establecerlo
+    if (paymentType && paymentType.amount) {
+      setPayment(prev => ({ ...prev, payment_type: paymentTypeId, amount: paymentType.amount!.toString() }));
+    }
+    
+    setErrors({ ...errors, payment_type: '' });
+  };
+
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
 
     if (!payment.student) {
       newErrors.student = 'El estudiante es requerido';
     }
+    if (!payment.payment_type) {
+      newErrors.payment_type = 'El tipo de pago es requerido';
+    }
     if (!payment.amount || parseFloat(payment.amount) <= 0) {
       newErrors.amount = 'El monto debe ser mayor a 0';
     }
-    if (!payment.month) {
-      newErrors.month = 'El mes es requerido';
-    }
-    if (!payment.year || payment.year < 2020 || payment.year > 2100) {
-      newErrors.year = 'El año debe ser válido';
+    // Validar campos requeridos según el tipo de pago seleccionado
+    if (selectedPaymentType) {
+      if (selectedPaymentType.requires_month && !payment.month) {
+        newErrors.month = 'El mes es requerido para este tipo de pago';
+      }
+      if (selectedPaymentType.requires_year && !payment.year) {
+        newErrors.year = 'El año es requerido para este tipo de pago';
+      }
+    } else {
+      if (!payment.month) {
+        newErrors.month = 'El mes es requerido';
+      }
+      if (!payment.year || payment.year < 2020 || payment.year > 2100) {
+        newErrors.year = 'El año debe ser válido';
+      }
     }
 
     // Validaciones específicas por método de pago
@@ -149,10 +256,11 @@ const PaymentForm: React.FC = () => {
     // Preparar datos del pago
     const paymentData: any = {
       student: payment.student,
+      payment_type: payment.payment_type || null,
       payment_method: payment.payment_method,
       amount: amountValue, // Enviar como número (DRF acepta números para DecimalField)
-      month: parseInt(payment.month.toString()),
-      year: parseInt(payment.year.toString()),
+      month: payment.month ? parseInt(payment.month.toString()) : null,
+      year: payment.year ? parseInt(payment.year.toString()) : null,
     };
 
     // Agregar campos específicos según el método (solo si tienen valor)
@@ -237,26 +345,79 @@ const PaymentForm: React.FC = () => {
             <h3 className="section-title">Información del Pago</h3>
             
             <div className="form-row">
-              <div className="form-group">
+              <div className="form-group student-search-group" ref={studentSearchRef}>
                 <label>Estudiante *</label>
-                <select
-                  value={payment.student}
-                  onChange={(e) => setPayment({ ...payment, student: e.target.value })}
-                  className={errors.student ? 'error' : ''}
-                  required
-                >
-                  <option value="">Seleccione un estudiante</option>
-                  {students.map((student) => (
-                    <option key={student.id} value={student.id}>
-                      {student.carnet} - {student.first_name} {student.last_name}
-                    </option>
-                  ))}
-                </select>
+                <div className="student-search-container">
+                  <FiSearch className="search-icon" />
+                  <input
+                    type="text"
+                    value={studentSearch}
+                    onChange={(e) => {
+                      setStudentSearch(e.target.value);
+                      if (!e.target.value) {
+                        setPayment({ ...payment, student: '' });
+                      }
+                    }}
+                    onFocus={() => {
+                      if (studentSearch.trim() && filteredStudents.length > 0) {
+                        setShowStudentDropdown(true);
+                      }
+                    }}
+                    placeholder="Buscar por carnet, nombre o apellido..."
+                    className={errors.student ? 'error' : ''}
+                    required
+                  />
+                  {showStudentDropdown && filteredStudents.length > 0 && (
+                    <div className="student-dropdown">
+                      {filteredStudents.map((student) => (
+                        <div
+                          key={student.id}
+                          className="student-dropdown-item"
+                          onClick={() => handleStudentSelect(student)}
+                        >
+                          <div className="student-item-carnet">{student.carnet}</div>
+                          <div className="student-item-name">
+                            {student.first_name} {student.last_name}
+                          </div>
+                        </div>
+                      ))}
+                      {filteredStudents.length === 0 && studentSearch.trim() && (
+                        <div className="student-dropdown-item no-results">
+                          No se encontraron estudiantes
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
                 {errors.student && <span className="error-message">{errors.student}</span>}
                 {selectedStudent && (
                   <p className="form-hint">Carnet: {selectedStudent.carnet}</p>
                 )}
               </div>
+
+              <div className="form-group">
+                <label>Tipo de Pago *</label>
+                <select
+                  value={payment.payment_type}
+                  onChange={(e) => handlePaymentTypeChange(e.target.value)}
+                  className={errors.payment_type ? 'error' : ''}
+                  required
+                >
+                  <option value="">Seleccione un tipo de pago</option>
+                  {paymentTypes.map((paymentType) => (
+                    <option key={paymentType.id} value={paymentType.id}>
+                      {paymentType.name} ({paymentType.code})
+                    </option>
+                  ))}
+                </select>
+                {errors.payment_type && <span className="error-message">{errors.payment_type}</span>}
+                {selectedPaymentType && selectedPaymentType.description && (
+                  <p className="form-hint">{selectedPaymentType.description}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="form-row">
 
               <div className="form-group">
                 <label>Método de Pago *</label>
@@ -280,9 +441,6 @@ const PaymentForm: React.FC = () => {
                   <option value="EFECTIVO">Efectivo</option>
                 </select>
               </div>
-            </div>
-
-            <div className="form-row">
               <div className="form-group">
                 <label>Monto *</label>
                 <input
@@ -291,45 +449,57 @@ const PaymentForm: React.FC = () => {
                   min="0.01"
                   value={payment.amount}
                   onChange={(e) => setPayment({ ...payment, amount: e.target.value })}
-                  className={errors.amount ? 'error' : ''}
+                  className={`${errors.amount ? 'error' : ''} ${selectedPaymentType && selectedPaymentType.amount ? 'readonly-field' : ''}`}
                   placeholder="0.00"
+                  readOnly={selectedPaymentType && selectedPaymentType.amount ? true : false}
                   required
+                  title={selectedPaymentType && selectedPaymentType.amount ? 'El monto está determinado por el tipo de pago seleccionado' : ''}
                 />
                 {errors.amount && <span className="error-message">{errors.amount}</span>}
+                {selectedPaymentType && selectedPaymentType.amount && (
+                  <p className="form-hint">Monto fijo determinado por el tipo de pago</p>
+                )}
               </div>
 
-              <div className="form-row-inline">
-                <div className="form-group">
-                  <label>Mes *</label>
-                  <select
-                    value={payment.month}
-                    onChange={(e) => setPayment({ ...payment, month: parseInt(e.target.value) })}
-                    className={errors.month ? 'error' : ''}
-                    required
-                  >
-                    {months.map((month) => (
-                      <option key={month.value} value={month.value}>
-                        {month.label}
-                      </option>
-                    ))}
-                  </select>
-                  {errors.month && <span className="error-message">{errors.month}</span>}
-                </div>
+              {(!selectedPaymentType || selectedPaymentType.requires_month || selectedPaymentType.requires_year) && (
+                <div className="form-row-inline">
+                  {(!selectedPaymentType || selectedPaymentType.requires_month) && (
+                    <div className="form-group">
+                      <label>Mes {selectedPaymentType?.requires_month ? '*' : ''}</label>
+                      <select
+                        value={payment.month || ''}
+                        onChange={(e) => setPayment({ ...payment, month: e.target.value ? parseInt(e.target.value) : undefined })}
+                        className={errors.month ? 'error' : ''}
+                        required={selectedPaymentType?.requires_month}
+                      >
+                        <option value="">Seleccione un mes</option>
+                        {months.map((month) => (
+                          <option key={month.value} value={month.value}>
+                            {month.label}
+                          </option>
+                        ))}
+                      </select>
+                      {errors.month && <span className="error-message">{errors.month}</span>}
+                    </div>
+                  )}
 
-                <div className="form-group">
-                  <label>Año *</label>
-                  <input
-                    type="number"
-                    min="2020"
-                    max="2100"
-                    value={payment.year}
-                    onChange={(e) => setPayment({ ...payment, year: parseInt(e.target.value) })}
-                    className={errors.year ? 'error' : ''}
-                    required
-                  />
-                  {errors.year && <span className="error-message">{errors.year}</span>}
+                  {(!selectedPaymentType || selectedPaymentType.requires_year) && (
+                    <div className="form-group">
+                      <label>Año {selectedPaymentType?.requires_year ? '*' : ''}</label>
+                      <input
+                        type="number"
+                        min="2020"
+                        max="2100"
+                        value={payment.year || ''}
+                        onChange={(e) => setPayment({ ...payment, year: e.target.value ? parseInt(e.target.value) : undefined })}
+                        className={errors.year ? 'error' : ''}
+                        required={selectedPaymentType?.requires_year}
+                      />
+                      {errors.year && <span className="error-message">{errors.year}</span>}
+                    </div>
+                  )}
                 </div>
-              </div>
+              )}
             </div>
           </div>
 

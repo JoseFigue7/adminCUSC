@@ -104,16 +104,10 @@ class StudentViewSet(viewsets.ModelViewSet):
             try:
                 required_documents = [
                     'BACHILLERATO_ORIGINAL',
-                    'BACHILLERATO_COPIA1',
-                    'BACHILLERATO_COPIA2',
                     'NACIMIENTO_ORIGINAL',
-                    'NACIMIENTO_COPIA1',
-                    'NACIMIENTO_COPIA2',
                     'CURP',
                     'MEDICO',
                     'FOTO_DIGITAL',
-                    'FOTO_FISICA1',
-                    'FOTO_FISICA2',
                     'DOMICILIO',
                 ]
                 
@@ -169,7 +163,7 @@ class StudentViewSet(viewsets.ModelViewSet):
             'approved_courses': approved_courses,
             'progress_percentage': round(progress_percentage, 2),
             'pensum_closed': student.pensum_closed,
-            'thesis_started': student.thesis_started,
+            'graduation_method_started': student.graduation_method_started,
         })
 
 
@@ -452,22 +446,6 @@ class StudentDocumentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Documentos que solo son para registro físico (no se suben archivos)
-        NON_UPLOADABLE_TYPES = [
-            'BACHILLERATO_COPIA1',
-            'BACHILLERATO_COPIA2',
-            'NACIMIENTO_COPIA1',
-            'NACIMIENTO_COPIA2',
-            'FOTO_FISICA1',
-            'FOTO_FISICA2'
-        ]
-        
-        if document.document_type in NON_UPLOADABLE_TYPES:
-            return Response(
-                {'error': f'El documento "{document.get_document_type_display()}" es solo para registro físico y no requiere archivo digital.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
         if 'file' not in request.FILES:
             return Response(
                 {'error': 'No se proporcionó archivo'},
@@ -556,18 +534,12 @@ class StudentDocumentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Validación adicional: no se puede aprobar un documento que no tiene archivo (excepto documentos físicos)
+        # Validación adicional: no se puede aprobar un documento que no tiene archivo
         if new_status == 'APROBADO' and not document.file:
-            NON_UPLOADABLE_TYPES = [
-                'BACHILLERATO_COPIA1', 'BACHILLERATO_COPIA2',
-                'NACIMIENTO_COPIA1', 'NACIMIENTO_COPIA2',
-                'FOTO_FISICA1', 'FOTO_FISICA2'
-            ]
-            if document.document_type not in NON_UPLOADABLE_TYPES:
-                return Response(
-                    {'error': f'No se puede aprobar el documento "{document.get_document_type_display()}" porque no tiene archivo subido.'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+            return Response(
+                {'error': f'No se puede aprobar el documento "{document.get_document_type_display()}" porque no tiene archivo subido.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         
         # Actualizar estado (ya validamos que no se pueda cambiar de aprobado)
         document.status = new_status
