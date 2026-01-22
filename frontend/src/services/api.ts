@@ -106,6 +106,7 @@ export const paymentsApi = {
   list: (params?: any) => api.get('/payments/payments/', { params }),
   get: (id: number) => api.get(`/payments/payments/${id}/`),
   create: (data: any) => api.post('/payments/payments/', data),
+  update: (id: string | number, data: any) => api.patch(`/payments/payments/${id}/`, data),
   approve: (id: string | number) => api.patch(`/payments/payments/${id}/approve/`),
   reject: (id: string | number, notes?: string) => api.patch(`/payments/payments/${id}/reject/`, notes ? { notes } : {}),
   uploadReceipt: (id: string | number, file: File) => {
@@ -124,6 +125,15 @@ export const paymentsApi = {
   getStatistics: () => api.get('/payments/payments/statistics/'),
   getMyAccounting: () => api.get('/payments/payments/my_accounting/'),
   getStudentAccounting: (studentId: string) => api.get(`/payments/payments/student_accounting/${studentId}/`),
+  getStudentsWithOverdue: () => api.get('/payments/payments/students_with_overdue/'),
+  findOldestUnpaid: (studentId: string, paymentTypeId: string) => 
+    api.get('/payments/payments/find_oldest_unpaid/', { params: { student_id: studentId, payment_type_id: paymentTypeId } }),
+  getPaymentAmount: (studentId: string, paymentTypeId: string) =>
+    api.get('/payments/payments/get_payment_amount/', { params: { student_id: studentId, payment_type_id: paymentTypeId } }),
+  createEnrollmentPayment: (data: any) => api.post('/payments/payments/create_enrollment_payment/', data),
+  downloadReceipt: (id: string | number) => api.get(`/payments/payments/${id}/download_receipt/`, { responseType: 'blob' }),
+  sendReceiptEmail: (id: string | number) => api.post(`/payments/payments/${id}/send_receipt_email/`),
+  exportCsv: (params?: any) => api.get('/payments/payments/export/csv/', { params, responseType: 'blob' }),
   createPaymentIntent: (data: any) => api.post('/payments/public/payment-intent/', data),
   processPublicPayment: (data: any) => api.post('/payments/public/payment/', data),
 };
@@ -139,6 +149,14 @@ export const scholarshipsApi = {
 export const paymentTypesApi = {
   list: (params?: any) => api.get('/payments/payment-types/', { params }),
   get: (id: number) => api.get(`/payments/payment-types/${id}/`),
+};
+
+export const exportsApi = {
+  listStudents: (params?: any) => api.get('/exports/exports/students-list/', { params }),
+  exportStudents: (studentIds: string[]) => 
+    api.post('/exports/exports/export_students/', { student_ids: studentIds }, {
+      responseType: 'blob', // Importante para descargar archivos
+    }),
 };
 
 export const academicsApi = {
@@ -162,6 +180,7 @@ export const academicsApi = {
   // Cuatrimestre Enrollments
   getCuatrimestreEnrollments: (params?: any) => api.get('/academics/cuatrimestre-enrollments/', { params }),
   getCuatrimestreEnrollment: (id: string | number) => api.get(`/academics/cuatrimestre-enrollments/${id}/`),
+  canCreateEnrollment: (studentId: string) => api.get('/academics/cuatrimestre-enrollments/can_create_enrollment/', { params: { student_id: studentId } }),
   createCuatrimestreEnrollment: (data: any) => api.post('/academics/cuatrimestre-enrollments/', data),
   updateCuatrimestreEnrollment: (id: string | number, data: any) => api.patch(`/academics/cuatrimestre-enrollments/${id}/`, data),
   deleteCuatrimestreEnrollment: (id: string | number) => api.delete(`/academics/cuatrimestre-enrollments/${id}/`),
@@ -287,11 +306,14 @@ export function getPayments(pageOrParams?: number | any, itemsPerPage?: number, 
   return paymentsApi.list(pageOrParams);
 }
 export const createPayment = paymentsApi.create;
+export const updatePayment = paymentsApi.update;
 export const approvePayment = paymentsApi.approve;
 export const rejectPayment = paymentsApi.reject;
 export const uploadPaymentReceipt = paymentsApi.uploadReceipt;
 export const updatePaymentReference = paymentsApi.updateReference;
 export const getPendingPaymentsCount = paymentsApi.getPendingCount;
+export const getStudentsWithOverdue = paymentsApi.getStudentsWithOverdue;
+export const findOldestUnpaidPayment = paymentsApi.findOldestUnpaid;
 export const getPaymentTypes = paymentTypesApi.list;
 export const getStudentByCarnet = (carnet: string) => 
   api.get('/payments/public/student/', { params: { carnet } });
@@ -336,18 +358,5 @@ export const getGraduationMethod = (studentId?: string | number) => {
 export const updateGraduationMethodStatus = academicsApi.updateGraduationMethodStatus;
 export const createGraduationMethod = academicsApi.createGraduationMethod;
 
-// Reports API
-export const reportsApi = {
-  getOverview: (params?: { start_date?: string; end_date?: string }) =>
-    api.get('/reports/overview/', { params }),
-  getStudentsReport: (params?: { start_date?: string; end_date?: string }) =>
-    api.get('/reports/students/', { params }),
-  getPaymentsReport: (params?: { start_date?: string; end_date?: string }) =>
-    api.get('/reports/payments/', { params }),
-  getAcademicsReport: (params?: { start_date?: string; end_date?: string }) =>
-    api.get('/reports/academics/', { params }),
-  getScholarshipsReport: (params?: { start_date?: string; end_date?: string }) =>
-    api.get('/reports/scholarships/', { params }),
-};
 
 

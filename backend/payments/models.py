@@ -54,10 +54,14 @@ class Payment(models.Model):
     
     # DEPRECATED: Este campo se mantiene solo para compatibilidad con registros existentes y reportes.
     # Usar final_amount en su lugar. El campo amount se actualiza automáticamente con final_amount en save().
+    # Hacer el campo opcional para evitar problemas de validación, se establecerá automáticamente en save()
     amount = models.DecimalField(
         max_digits=10,
         decimal_places=2,
-        validators=[MinValueValidator(Decimal('0.01'))],
+        null=True,  # Permitir null temporalmente hasta que se calcule en save()
+        blank=True,  # Permitir blank para evitar ValidationError
+        default=Decimal('0.00'),  # Valor por defecto para evitar ValidationError
+        validators=[MinValueValidator(Decimal('0.00'))],  # Permitir 0 para pago 100 (gratis)
         verbose_name='Monto',
         help_text='DEPRECATED: Usar final_amount. Se mantiene para compatibilidad.'
     )
@@ -68,7 +72,7 @@ class Payment(models.Model):
         decimal_places=2,
         null=True,
         blank=True,
-        validators=[MinValueValidator(Decimal('0.01'))],
+        validators=[MinValueValidator(Decimal('0.00'))],  # Permitir 0 para pago 100 (gratis)
         verbose_name='Monto original',
         help_text='Monto sin beca ni mora (monto base del pago)'
     )
@@ -85,7 +89,7 @@ class Payment(models.Model):
         decimal_places=2,
         null=True,
         blank=True,
-        validators=[MinValueValidator(Decimal('0.01'))],
+        validators=[MinValueValidator(Decimal('0.00'))],  # Permitir 0 para pago 100 (gratis)
         verbose_name='Monto final',
         help_text='Monto final a pagar: original_amount - scholarship_discount_amount + penalty_amount'
     )
@@ -111,7 +115,7 @@ class Payment(models.Model):
         decimal_places=2,
         null=True,
         blank=True,
-        validators=[MinValueValidator(Decimal('0.01'))],
+        validators=[MinValueValidator(Decimal('0.00'))],  # Permitir 0 para evitar ValidationError
         verbose_name='Monto base (sin mora)'
     )
     
@@ -219,8 +223,27 @@ class Payment(models.Model):
                 # Si no, asumimos que amount es el original (sin mora ni beca)
                 self.original_amount = self.amount
             else:
-                # Si no hay ningún monto, no podemos calcular
-                return
+                # Si no hay ningún monto, verificar si es pago 100 (gratis)
+                # Cargar payment_type si no está cargado
+                payment_type_code = None
+                if self.payment_type:
+                    payment_type_code = self.payment_type.code
+                elif self.payment_type_id:
+                    try:
+                        from django.apps import apps
+                        PaymentType = apps.get_model('payments', 'PaymentType')
+                        payment_type = PaymentType.objects.get(id=self.payment_type_id)
+                        payment_type_code = payment_type.code
+                    except PaymentType.DoesNotExist:
+                        pass
+                
+                if payment_type_code == '100':
+                    # Para pago 100, establecer montos en 0
+                    self.original_amount = Decimal('0.00')
+                else:
+                    # Si no hay ningún monto y no es pago gratis, usar 0 como fallback
+                    # Esto evita ValidationError pero debería ser manejado por el serializer
+                    self.original_amount = Decimal('0.00')
         
         # 2. Calcular descuento por beca
         scholarship = self._get_active_scholarship()
@@ -252,12 +275,26 @@ class Payment(models.Model):
         
         # 5. Mantener compatibilidad: actualizar amount con final_amount para reportes existentes
         # DEPRECATED: amount se mantiene solo para compatibilidad
-        self.amount = self.final_amount
+        # Para pago 100 (gratis), permitir amount = 0
+        # Asegurarse de que amount siempre tenga un valor
+        if self.final_amount is not None:
+            self.amount = self.final_amount
+        elif self.original_amount is not None:
+            # Si final_amount no está calculado pero original_amount sí, usar original_amount
+            self.amount = self.original_amount
+        elif self.amount is None:
+            # Si amount no está establecido, usar 0 como fallback
+            self.amount = Decimal('0.00')
         
         # 6. Mantener base_amount para compatibilidad con código existente
         # base_amount ahora representa el monto después del descuento de beca (antes de mora)
+        # Solo establecer base_amount si amount_after_scholarship es mayor a 0 (porque tiene MinValueValidator(0.01))
         if not self.base_amount:
-            self.base_amount = amount_after_scholarship
+            if amount_after_scholarship > Decimal('0.00'):
+                self.base_amount = amount_after_scholarship
+            else:
+                # Si el monto después de beca es 0, no establecer base_amount (permitir null)
+                self.base_amount = None
     
     def save(self, *args, **kwargs):
         """Calcular mora automáticamente, asignar carrera y aprobar pagos según método"""
@@ -271,11 +308,40 @@ class Payment(models.Model):
         # Validación de negocio: transferencias no pueden ser aprobadas automáticamente al crear
         is_new_payment = not self.pk
         
+        # Verificar si es pago 100 (gratis) - se aprueba automáticamente
+        is_free_payment = False
+        try:
+            # Intentar obtener el código del tipo de pago
+            if self.payment_type and hasattr(self.payment_type, 'code'):
+                # Si payment_type está cargado, usar directamente
+                if self.payment_type.code == '100':
+                    is_free_payment = True
+            elif self.payment_type_id:
+                # Si no está cargado, obtenerlo desde la BD usando referencia diferida
+                from django.apps import apps
+                PaymentType = apps.get_model('payments', 'PaymentType')
+                try:
+                    payment_type = PaymentType.objects.get(id=self.payment_type_id)
+                    if payment_type.code == '100':
+                        is_free_payment = True
+                except PaymentType.DoesNotExist:
+                    pass
+        except (AttributeError, Exception):
+            # Si hay error, continuar sin marcar como gratis
+            pass
+        
         if is_new_payment:
+            # Si es pago gratis (100), aprobar automáticamente sin importar el método
+            if is_free_payment:
+                self.status = 'APROBADO'
+                if not self.approved_by and self.created_by:
+                    self.approved_by = self.created_by
+                if not self.approved_at:
+                    self.approved_at = timezone.now()
             # Aprobar automáticamente solo pagos en efectivo
             # Los pagos con tarjeta quedan pendientes hasta que el webhook los confirme
             # Las transferencias pueden ser NO_PAGADO (para colegiaturas mensuales) o PENDIENTE
-            if self.payment_method == 'EFECTIVO':
+            elif self.payment_method == 'EFECTIVO':
                 # Aprobar automáticamente pagos en efectivo
                 # Ignorar cualquier status que se haya establecido manualmente
                 self.status = 'APROBADO'
@@ -406,7 +472,7 @@ class PaymentType(models.Model):
         decimal_places=2,
         null=True,
         blank=True,
-        validators=[MinValueValidator(Decimal('0.01'))],
+        validators=[MinValueValidator(Decimal('0.00'))],  # Permitir 0.00 para pagos gratuitos (código 100)
         verbose_name='Monto fijo (opcional)'
     )
     is_active = models.BooleanField(default=True, verbose_name='Activo')

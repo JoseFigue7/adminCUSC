@@ -438,7 +438,7 @@ const StudentDetail: React.FC = () => {
                 ) : (
                   <div className="contract-status-message">
                     <p style={{ marginBottom: '1rem' }}>
-                      El contrato aún no ha sido generado. Si acaba de crear el estudiante, el contrato debería generarse automáticamente.
+                      El contrato aún no ha sido generado. Para generar el contrato, el estudiante debe tener cursos asignados.
                     </p>
                     <button 
                       className="btn btn-primary" 

@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recibo de Pago</title>
+    <style>
+        @page {
+            size: letter;
+            margin: 2cm;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            line-height: 1.6;
+            color: #333;
+            margin: 0;
+            padding: 0;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            border-bottom: 3px solid #2563eb;
+            padding-bottom: 20px;
+        }
+        .logo-container {
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        .logo-container img {
+            max-width: 150px;
+            max-height: 100px;
+        }
+        .institution-name {
+            font-size: 18px;
+            font-weight: bold;
+            color: #1e293b;
+            margin-top: 10px;
+        }
+        .receipt-title {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2563eb;
+            margin-top: 15px;
+        }
+        .receipt-info {
+            margin-top: 30px;
+            margin-bottom: 20px;
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .info-label {
+            font-weight: bold;
+            width: 40%;
+            color: #475569;
+        }
+        .info-value {
+            width: 60%;
+            text-align: right;
+        }
+        .amount-section {
+            background-color: #f1f5f9;
+            padding: 20px;
+            margin: 30px 0;
+            border-radius: 8px;
+            border: 2px solid #2563eb;
+        }
+        .amount-label {
+            font-size: 14px;
+            color: #475569;
+            margin-bottom: 5px;
+        }
+        .amount-value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #2563eb;
+        }
+        .payment-details {
+            margin-top: 30px;
+        }
+        .details-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        .details-table th,
+        .details-table td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .details-table th {
+            background-color: #f8fafc;
+            font-weight: bold;
+            color: #475569;
+        }
+        .footer {
+            margin-top: 50px;
+            text-align: center;
+            font-size: 10px;
+            color: #64748b;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 20px;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 11px;
+        }
+        .status-approved {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+        .status-pending {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+        .status-rejected {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        {% if logo_base64 %}
+        <div class="logo-container">
+            <img src="{{ logo_base64 }}" alt="Logo" />
+        </div>
+        {% endif %}
+        <div class="institution-name">{{ institution_name }}</div>
+        <div class="receipt-title">RECIBO DE PAGO</div>
+    </div>
+    
+    <div class="receipt-info">
+        <div class="info-row">
+            <span class="info-label">Número de Recibo:</span>
+            <span class="info-value">{{ receipt_number }}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Fecha de Emisión:</span>
+            <span class="info-value">{{ date }}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Estudiante:</span>
+            <span class="info-value">{{ student.get_full_name }}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Carnet:</span>
+            <span class="info-value">{{ student.carnet }}</span>
+        </div>
+        {% if student.career %}
+        <div class="info-row">
+            <span class="info-label">Carrera:</span>
+            <span class="info-value">{{ student.career.name }}</span>
+        </div>
+        {% endif %}
+    </div>
+    
+    <div class="payment-details">
+        <h3 style="color: #1e293b; border-bottom: 2px solid #2563eb; padding-bottom: 5px;">Detalles del Pago</h3>
+        <table class="details-table">
+            <tr>
+                <th>Tipo de Pago</th>
+                <td>{{ payment_type.name|default:"N/A" }}</td>
+            </tr>
+            <tr>
+                <th>Método de Pago</th>
+                <td>{{ payment_method_display }}</td>
+            </tr>
+            <tr>
+                <th>Fecha de Pago</th>
+                <td>{% if payment.payment_date %}{{ payment.payment_date|date:"d/m/Y" }}{% else %}N/A{% endif %}</td>
+            </tr>
+            {% if payment.month %}
+            <tr>
+                <th>Mes</th>
+                <td>{{ payment.get_month_display }}</td>
+            </tr>
+            {% endif %}
+            {% if payment.year %}
+            <tr>
+                <th>Año</th>
+                <td>{{ payment.year }}</td>
+            </tr>
+            {% endif %}
+            <tr>
+                <th>Estado</th>
+                <td>
+                    <span class="status-badge 
+                        {% if payment.status == 'APROBADO' %}status-approved
+                        {% elif payment.status == 'PENDIENTE' or payment.status == 'EN_REVISION' %}status-pending
+                        {% elif payment.status == 'RECHAZADO' %}status-rejected
+                        {% endif %}">
+                        {{ status_display }}
+                    </span>
+                </td>
+            </tr>
+            {% if payment.payment_reference %}
+            <tr>
+                <th>Referencia de Pago</th>
+                <td>{{ payment.payment_reference }}</td>
+            </tr>
+            {% endif %}
+            {% if payment.transaction_id %}
+            <tr>
+                <th>ID de Transacción</th>
+                <td>{{ payment.transaction_id }}</td>
+            </tr>
+            {% endif %}
+            {% if payment.card_last_four %}
+            <tr>
+                <th>Últimos 4 dígitos de Tarjeta</th>
+                <td>****{{ payment.card_last_four }}</td>
+            </tr>
+            {% endif %}
+        </table>
+    </div>
+    
+    <div class="amount-section">
+        <div class="amount-label">MONTO TOTAL</div>
+        <div class="amount-value">${{ amount|floatformat:2 }}</div>
+    </div>
+    
+    {% if payment.notes %}
+    <div style="margin-top: 30px; padding: 15px; background-color: #f8fafc; border-left: 4px solid #2563eb;">
+        <strong>Notas:</strong>
+        <p style="margin: 5px 0 0 0;">{{ payment.notes }}</p>
+    </div>
+    {% endif %}
+    
+    <div class="footer">
+        <p>Este es un documento generado automáticamente por el sistema de gestión estudiantil.</p>
+        <p>Para cualquier consulta, por favor contacte a la administración.</p>
+        <p style="margin-top: 15px;">{{ institution_name }} - {{ date }}</p>
+    </div>
+</body>
+</html>

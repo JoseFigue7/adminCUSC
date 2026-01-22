@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { getPayments, approvePayment, rejectPayment, uploadPaymentReceipt, updatePaymentReference, getPaymentTypes, getPendingPaymentsCount } from '../services/api';
+import { getPayments, approvePayment, rejectPayment, uploadPaymentReceipt, updatePaymentReference, getPaymentTypes, getPendingPaymentsCount, paymentsApi } from '../services/api';
 import { FiDollarSign, FiCheck, FiX, FiAlertCircle, FiPlus, FiDownload, FiUpload, FiArrowUp, FiArrowDown, FiEdit2, FiSave, FiCreditCard } from '../utils/icons';
 import { useToast } from '../hooks/useToast';
 import Pagination from './Pagination';
@@ -52,6 +52,7 @@ const PaymentList: React.FC = () => {
   const [paymentTypes, setPaymentTypes] = useState<PaymentType[]>([]);
   const [ordering, setOrdering] = useState<string>('-payment_date');
   const [pendingCount, setPendingCount] = useState<number>(0);
+  const [exporting, setExporting] = useState<boolean>(false);
 
   const loadPaymentTypes = useCallback(async () => {
     try {
@@ -328,6 +329,45 @@ const PaymentList: React.FC = () => {
     }
   };
 
+  const handleExportCsv = async () => {
+    setExporting(true);
+    try {
+      // Limpiar filtros vacíos antes de exportar
+      const cleanFilters: FilterParams = {};
+      Object.keys(filters).forEach(key => {
+        const value = filters[key];
+        if (value !== undefined && value !== null && value !== '') {
+          cleanFilters[key] = value;
+        }
+      });
+      
+      // Agregar ordenamiento
+      const params = { ...cleanFilters, ordering };
+      
+      const response = await paymentsApi.exportCsv(params);
+      
+      // Crear blob y descargar
+      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `pagos_${new Date().toISOString().split('T')[0]}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      success(`Exportación exitosa: ${totalItems} pago(s) exportado(s)`);
+    } catch (err: any) {
+      console.error('Error exporting payments:', err);
+      const errorMessage = err.response?.data?.detail || err.response?.data?.error || 'Error al exportar pagos';
+      error(errorMessage);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="page-container">
@@ -351,6 +391,14 @@ const PaymentList: React.FC = () => {
             </div>
           </div>
           <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+            <button
+              className="btn btn-secondary btn-large"
+              onClick={handleExportCsv}
+              disabled={exporting || totalItems === 0}
+              title="Exportar pagos filtrados a CSV"
+            >
+              <FiDownload /> {exporting ? 'Exportando...' : 'Exportar CSV'}
+            </button>
             <Link to="/payments/new" className="btn btn-primary btn-large">
               <FiPlus /> Nuevo Pago
             </Link>

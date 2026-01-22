@@ -434,28 +434,51 @@ class ConfirmCourseAssignmentService:
         Generar pagos mensuales del cuatrimestre.
         El pago mensual = Monto base del tipo 102 (PaymentType) + adicionales de cursos (course.cost)
         
+        Si el estudiante tiene beca:
+        - Media beca: usa código 103 con descuento del 50%
+        - Beca completa: usa código 105 con monto 0 (un solo pago por todo el cuatrimestre)
+        
         Returns:
             list: Lista de IDs de pagos creados
         """
         from payments.models import Payment, PaymentType
         from datetime import datetime
+        import logging
+        logger = logging.getLogger(__name__)
         
         # Obtener carrera del estudiante
         career = self.cuatrimestre_enrollment.cuatrimestre.career
         
-        # Obtener monto base mensual del tipo de pago 102 (Colegiatura de Cursos)
+        # Verificar si el estudiante tiene beca activa
+        scholarship = getattr(self.student, 'scholarship', None)
+        scholarship_type = None
+        if scholarship and scholarship.status == 'ACTIVA':
+            scholarship_type = scholarship.scholarship_type
+        
+        # Determinar el código de tipo de pago según la beca
+        if scholarship_type == 'COMPLETA':
+            payment_code = '105'  # Beca completa
+        elif scholarship_type == 'MEDIA':
+            payment_code = '103'  # Media beca
+        else:
+            payment_code = '102'  # Sin beca
+        
+        # Obtener monto base mensual del tipo de pago 102 (para calcular el monto real)
         try:
-            tuition_payment_type = PaymentType.objects.get(code='102', is_active=True)
-            base_monthly_amount = tuition_payment_type.amount or Decimal('0.00')
+            base_payment_type = PaymentType.objects.get(code='102', is_active=True)
+            base_monthly_amount = base_payment_type.amount or Decimal('0.00')
             if base_monthly_amount == 0:
-                import logging
-                logger = logging.getLogger(__name__)
                 logger.warning('Tipo de pago 102 (Colegiatura de Cursos) no tiene monto configurado. No se generan pagos.')
                 return []
         except PaymentType.DoesNotExist:
-            import logging
-            logger = logging.getLogger(__name__)
             logger.error('Tipo de pago 102 (Colegiatura de Cursos) no encontrado. Ejecute el comando seed_payment_types.')
+            return []
+        
+        # Obtener el tipo de pago correcto según la beca
+        try:
+            tuition_payment_type = PaymentType.objects.get(code=payment_code, is_active=True)
+        except PaymentType.DoesNotExist:
+            logger.error(f'Tipo de pago {payment_code} no encontrado. Ejecute el comando seed_payment_types.')
             return []
         
         # Calcular adicionales de cursos (course.cost ahora son adicionales, no el costo total)
@@ -466,14 +489,16 @@ class ConfirmCourseAssignmentService:
             course_additional = enrollment.course.cost or Decimal('0.00')
             course_additionals += course_additional
         
-        # Pago mensual total = base + adicionales
-        monthly_amount = base_monthly_amount + course_additionals
-        
-        if monthly_amount == 0:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(f'No se generan pagos para cuatrimestre_enrollment {self.cuatrimestre_enrollment.id}: el monto mensual es cero')
-            return []
+        # Calcular monto mensual según el tipo de beca
+        if scholarship_type == 'COMPLETA':
+            # Beca completa: monto es 0, solo un pago por todo el cuatrimestre
+            monthly_amount = Decimal('0.00')
+        elif scholarship_type == 'MEDIA':
+            # Media beca: aplicar 50% de descuento al monto base + adicionales
+            monthly_amount = (base_monthly_amount + course_additionals) * Decimal('0.50')
+        else:
+            # Sin beca: monto completo
+            monthly_amount = base_monthly_amount + course_additionals
         
         # Obtener período académico
         period = get_academic_period(self.cuatrimestre_enrollment.cuatrimestre.number)
@@ -493,16 +518,7 @@ class ConfirmCourseAssignmentService:
             }
             months = period_months.get(period, [2, 3, 4, 5])
         
-        # Obtener tipo de pago de colegiatura (código 102)
-        try:
-            tuition_payment_type = PaymentType.objects.get(code='102')
-        except PaymentType.DoesNotExist:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error('Tipo de pago 102 (Colegiatura de Cursos) no encontrado. Ejecute el comando seed_payment_types.')
-            return []
-        
-        # Verificar si ya existen pagos para este cuatrimestre enrollment
+        # Verificar si ya existen pagos para este cuatrimestre enrollment con el tipo de pago correcto
         existing_payments = Payment.objects.filter(
             cuatrimestre_enrollment=self.cuatrimestre_enrollment,
             payment_type=tuition_payment_type
@@ -512,7 +528,46 @@ class ConfirmCourseAssignmentService:
         if existing_payments.exists():
             return [str(p.id) for p in existing_payments]
         
-        # Generar pagos mensuales (uno por cada mes del período)
+        # Para beca completa, crear un solo pago por todo el cuatrimestre
+        if scholarship_type == 'COMPLETA':
+            current_year = self.cuatrimestre_enrollment.academic_year
+            first_month = months[0] if months else 1
+            
+            # Obtener fecha límite de pago
+            try:
+                due_date_config = MonthlyPaymentDueDate.objects.get(month=first_month, is_active=True)
+                due_day = due_date_config.due_day
+            except MonthlyPaymentDueDate.DoesNotExist:
+                due_day = 10  # Valor por defecto
+            
+            # Calcular fecha límite
+            try:
+                due_date = datetime(current_year, first_month, due_day).date()
+            except ValueError:
+                if first_month == 2:
+                    due_date = datetime(current_year, first_month, 28).date()
+                else:
+                    due_date = datetime(current_year, first_month, due_day).date()
+            
+            payment_date = datetime(current_year, first_month, 1).date()
+            
+            # Crear un solo pago con monto 0 para todo el cuatrimestre
+            payment = Payment.objects.create(
+                student=self.student,
+                payment_type=tuition_payment_type,
+                payment_method='TRANSFERENCIA',
+                original_amount=Decimal('0.00'),
+                month=first_month,
+                year=current_year,
+                payment_date=payment_date,
+                due_date=due_date,
+                status='APROBADO',  # Beca completa se marca como aprobado automáticamente
+                cuatrimestre_enrollment=self.cuatrimestre_enrollment,
+                notes=f'Colegiatura completa con beca completa - Cuatrimestre completo pagado (monto: $0.00)'
+            )
+            return [str(payment.id)]
+        
+        # Para media beca o sin beca, generar pagos mensuales (uno por cada mes del período)
         current_year = self.cuatrimestre_enrollment.academic_year
         payments_created = []
         
@@ -538,6 +593,10 @@ class ConfirmCourseAssignmentService:
                     due_date = datetime(current_year, month, due_day).date()
             
             # Crear pago con estado inicial NO_PAGADO y fecha programada al día 1
+            notes = f'Colegiatura mensual - {dict(Payment.MONTHS)[month]} {current_year}'
+            if scholarship_type == 'MEDIA':
+                notes += ' (Media beca - 50% descuento aplicado)'
+            
             payment = Payment.objects.create(
                 student=self.student,
                 payment_type=tuition_payment_type,
@@ -549,7 +608,7 @@ class ConfirmCourseAssignmentService:
                 due_date=due_date,
                 status='NO_PAGADO',  # Estado inicial: NO_PAGADO
                 cuatrimestre_enrollment=self.cuatrimestre_enrollment,
-                notes=f'Colegiatura mensual - {dict(Payment.MONTHS)[month]} {current_year}'
+                notes=notes
             )
             payments_created.append(str(payment.id))
         

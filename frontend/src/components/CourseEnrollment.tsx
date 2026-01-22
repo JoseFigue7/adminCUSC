@@ -271,21 +271,132 @@ const CourseEnrollment: React.FC = () => {
         // Recargar datos para obtener el nuevo estado
         await loadData();
         
-        // Después de pre-asignar, mostrar la hoja de asignación para descargar/ver
-        // NO confirmar inmediatamente - el usuario debe revisar y confirmar después
-        try {
-          // Generar y mostrar la boleta de asignación (hoja con cursos, precios y horarios)
-          const response = await academicsApi.previewBoleta(cuatrimestreEnrollmentId);
-          const blob = new Blob([response.data], { type: 'application/pdf' });
-          const url = window.URL.createObjectURL(blob);
-          setBoletaUrl(url);
-          setShowBoletaModal(true);
+        // Inmediatamente confirmar la asignación y generar pagos
+        // Usar pago mensual por defecto (el usuario puede cambiar después si quiere)
+        const confirmResult = await academicsApi.confirmCourseAssignment(
+          cuatrimestreEnrollmentId,
+          'monthly' // Opción de pago mensual por defecto
+        );
+        
+        success('Asignación confirmada exitosamente. El plan de pagos ha sido generado.');
+        
+        // Recargar datos después de confirmar
+        await loadData();
+        const res = await academicsApi.getCuatrimestreEnrollment(cuatrimestreEnrollmentId);
+        setCuatrimestreEnrollment(res.data);
+        
+        // Verificar si se crearon pagos y descargar el talonario automáticamente
+        const paymentsCreated = confirmResult?.data?.payments_created || [];
+        const noPaymentsReason = confirmResult?.data?.no_payments_reason;
+        
+        // Intentar descargar el talonario si no está exonerado
+        if (!res.data.is_enrollment_fee_exempt) {
+          // Intentar obtener y descargar el talonario con reintentos
+          let voucherSuccess = false;
+          let lastError: any = null;
+          const maxAttempts = 3;
           
-          success('Cursos pre-asignados exitosamente. Por favor, revise la hoja de asignación y confirme cuando esté listo.');
-        } catch (boletaErr: any) {
-          console.error('Error generating boleta:', boletaErr);
-          // Si falla la generación de la boleta, mostrar mensaje pero continuar
-          warning('Los cursos se pre-asignaron, pero no se pudo generar la hoja de asignación. Puede revisarla más tarde.');
+          for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+              // Delay progresivo: 500ms, 1000ms, 2000ms
+              const delay = 500 * Math.pow(2, attempt - 1);
+              await new Promise(resolve => setTimeout(resolve, delay));
+              
+              console.log(`Intento ${attempt} de obtener talonario de pagos...`);
+              
+              const voucherResponse = await academicsApi.getPaymentVoucher(cuatrimestreEnrollmentId);
+              const blob = new Blob([voucherResponse.data], { type: 'application/pdf' });
+              const url = window.URL.createObjectURL(blob);
+              
+              // Descargar automáticamente el talonario
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `talonario_pagos_${cuatrimestreEnrollmentId}.pdf`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              window.URL.revokeObjectURL(url);
+              
+              voucherSuccess = true;
+              success('Talonario de pagos descargado exitosamente.');
+              
+              // Redirigir al perfil del estudiante después de descargar
+              setTimeout(() => {
+                if (res.data.student) {
+                  navigate(`/students/${res.data.student}`);
+                } else if (student?.id) {
+                  navigate(`/students/${student.id}`);
+                } else {
+                  navigate('/students');
+                }
+              }, 1000);
+              break;
+            } catch (voucherErr: any) {
+              lastError = voucherErr;
+              console.error(`Error en intento ${attempt} de generar talonario:`, voucherErr);
+              
+              // Si es el último intento, mostrar el error
+              if (attempt === maxAttempts) {
+                let errorMsg = 'Error al generar el talonario de pagos';
+                if (voucherErr.response?.data) {
+                  // Intentar leer el error del response
+                  if (voucherErr.response.data instanceof Blob) {
+                    // Si es un Blob, intentar leerlo como texto
+                    const text = await voucherErr.response.data.text();
+                    try {
+                      const errorData = JSON.parse(text);
+                      errorMsg = errorData.error || errorData.message || errorMsg;
+                    } catch {
+                      errorMsg = text || errorMsg;
+                    }
+                  } else {
+                    errorMsg = voucherErr.response.data.error || voucherErr.response.data.message || errorMsg;
+                  }
+                }
+                warning(`No se pudo descargar el talonario: ${errorMsg}. Puede descargarlo más tarde desde la sección de pagos.`);
+                
+                // Redirigir de todas formas
+                setTimeout(() => {
+                  if (res.data.student) {
+                    navigate(`/students/${res.data.student}`);
+                  } else if (student?.id) {
+                    navigate(`/students/${student.id}`);
+                  } else {
+                    navigate('/students');
+                  }
+                }, 2000);
+              }
+            }
+          }
+          
+          // Si después de todos los intentos no se pudo obtener el talonario
+          if (!voucherSuccess && lastError) {
+            console.warn('No se pudo obtener el talonario después de 3 intentos:', lastError);
+          }
+        } else if (res.data.is_enrollment_fee_exempt) {
+          success('Asignación confirmada. El estudiante está exonerado de pagos de colegiatura.');
+          // Redirigir al perfil del estudiante
+          setTimeout(() => {
+            if (res.data.student) {
+              navigate(`/students/${res.data.student}`);
+            } else if (student?.id) {
+              navigate(`/students/${student.id}`);
+            } else {
+              navigate('/students');
+            }
+          }, 2000);
+        } else if (noPaymentsReason === 'no_cost') {
+          success('Asignación confirmada. Los cursos asignados no tienen costo asignado.');
+          // Redirigir al perfil del estudiante
+          setTimeout(() => {
+            if (res.data.student) {
+              navigate(`/students/${res.data.student}`);
+            } else if (student?.id) {
+              navigate(`/students/${student.id}`);
+            } else {
+              navigate('/students');
+            }
+          }, 2000);
         }
         
       } else if (studentId) {
@@ -472,6 +583,17 @@ const CourseEnrollment: React.FC = () => {
             
             voucherSuccess = true;
             success('Talonario de pagos descargado exitosamente.');
+            
+            // Redirigir al perfil del estudiante después de descargar
+            setTimeout(() => {
+              if (cuatrimestreEnrollment?.student) {
+                navigate(`/students/${cuatrimestreEnrollment.student}`);
+              } else if (student?.id) {
+                navigate(`/students/${student.id}`);
+              } else {
+                navigate('/students');
+              }
+            }, 1000);
             break;
           } catch (voucherErr: any) {
             lastError = voucherErr;
@@ -631,15 +753,42 @@ const CourseEnrollment: React.FC = () => {
             {/* Solo mostrar botón de matricular si el estado permite edición */}
             {cuatrimestreEnrollmentId && cuatrimestreEnrollment && 
              (cuatrimestreEnrollment.status === 'EN_CURSO' || cuatrimestreEnrollment.status === 'FINALIZADO') ? (
-              <div style={{ 
-                padding: '0.5rem 1rem', 
-                borderRadius: '4px',
-                background: '#dbeafe',
-                color: '#1e40af'
-              }}>
-                <FiInfo style={{ marginRight: '0.5rem' }} />
-                Asignación confirmada - Solo visualización
-              </div>
+              <>
+                <button
+                  onClick={async () => {
+                    try {
+                      const voucherResponse = await academicsApi.getPaymentVoucher(cuatrimestreEnrollmentId);
+                      const blob = new Blob([voucherResponse.data], { type: 'application/pdf' });
+                      const url = window.URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `talonario_pagos_${cuatrimestreEnrollmentId}.pdf`;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      window.URL.revokeObjectURL(url);
+                      success('Talonario de pagos descargado exitosamente.');
+                    } catch (err: any) {
+                      console.error('Error downloading payment voucher:', err);
+                      const errorMsg = err.response?.data?.error || err.response?.data?.message || 'Error al descargar el talonario';
+                      error(errorMsg);
+                    }
+                  }}
+                  className="btn btn-primary btn-large"
+                >
+                  <FiDownload /> Reimprimir Talonario de Pagos
+                </button>
+                <div style={{ 
+                  padding: '0.5rem 1rem', 
+                  borderRadius: '4px',
+                  background: '#dbeafe',
+                  color: '#1e40af',
+                  marginLeft: '1rem'
+                }}>
+                  <FiInfo style={{ marginRight: '0.5rem' }} />
+                  Asignación confirmada - Solo visualización
+                </div>
+              </>
             ) : (
               selectedCourses.size > 0 && (
                 <>

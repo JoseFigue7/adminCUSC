@@ -20,6 +20,6 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='student',
             name='phone',
-            field=models.CharField(help_text='Número telefónico mexicano: debe comenzar con +52 seguido de 10 dígitos. Ejemplo: +525512345678', max_length=13, validators=[students.models.validate_mexican_phone], verbose_name='Teléfono'),
+            field=models.CharField(help_text='Número telefónico: solo se permite el signo + y números. Ejemplo: +1234567890', max_length=20, validators=[students.models.validate_phone], verbose_name='Teléfono'),
         ),
     ]

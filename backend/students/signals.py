@@ -3,11 +3,14 @@ Señales para rastrear cambios de estado en modelos de estudiantes
 """
 from django.db.models.signals import pre_save, post_save
 from django.dispatch import receiver
+import logging
 from .models import (
     Student, Enrollment, StudentDocument, 
     EnrollmentStatusHistory, StudentDocumentStatusHistory,
     generate_moodle_username, generate_moodle_password
 )
+
+logger = logging.getLogger(__name__)
 
 
 @receiver(pre_save, sender=Enrollment)
@@ -109,20 +112,36 @@ def generate_moodle_credentials(sender, instance, created, **kwargs):
     Genera automáticamente el usuario y contraseña de Moodle cuando se crea un estudiante.
     Solo se genera si no existen ya (para no sobrescribir si se crean manualmente).
     """
-    if created and not instance.moodle_username:
-        # Generar usuario de Moodle
-        username = generate_moodle_username(
-            instance.first_name,
-            instance.first_last_name,
-            instance.second_last_name
-        )
-        
-        # Generar contraseña de Moodle
-        password = generate_moodle_password()
-        
-        # Actualizar el estudiante con las credenciales
-        # Usar update para evitar recursión en el signal
-        Student.objects.filter(pk=instance.pk).update(
-            moodle_username=username,
-            moodle_password=password
-        )
+    # Verificar si las credenciales no existen (tanto en creación como en actualización)
+    if not instance.moodle_username or not instance.moodle_password:
+        # Solo generar si tenemos los datos necesarios
+        if instance.first_name and instance.first_last_name:
+            try:
+                # Generar usuario de Moodle
+                username = generate_moodle_username(
+                    instance.first_name,
+                    instance.first_last_name,
+                    instance.second_last_name
+                )
+                
+                # Generar contraseña de Moodle
+                password = generate_moodle_password()
+                
+                logger.info(f'Generando credenciales de Moodle para estudiante {instance.id}: usuario={username}')
+                
+                # Actualizar el estudiante con las credenciales
+                # Usar update para evitar recursión en el signal
+                Student.objects.filter(pk=instance.pk).update(
+                    moodle_username=username,
+                    moodle_password=password
+                )
+                
+                # Actualizar la instancia en memoria para que esté sincronizada
+                instance.moodle_username = username
+                instance.moodle_password = password
+                
+                logger.info(f'Credenciales de Moodle generadas exitosamente para estudiante {instance.id}')
+            except Exception as e:
+                logger.error(f'Error al generar credenciales de Moodle para estudiante {instance.id}: {str(e)}', exc_info=True)
+        else:
+            logger.warning(f'No se pueden generar credenciales de Moodle para estudiante {instance.id}: faltan datos (first_name o first_last_name)')

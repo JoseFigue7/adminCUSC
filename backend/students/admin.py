@@ -38,7 +38,7 @@ class StudentAdmin(admin.ModelAdmin):
         'status_badge', 'scholarship_badge', 'enrollment_date'
     ]
     list_filter = ['is_active', 'career', 'scholarship_type', 'pensum_closed', 'graduation_method_started', 'enrollment_date', 'gender', 'birth_country']
-    search_fields = ['carnet', 'first_name', 'first_last_name', 'second_last_name', 'email', 'curp']
+    search_fields = ['carnet', 'first_name', 'first_last_name', 'second_last_name', 'email', 'curp', 'moodle_username']
     readonly_fields = [
         'id', 'carnet', 'enrollment_date', 'created_at', 'updated_at', 
         'student_documents_link', 'student_payments_link'
@@ -85,6 +85,12 @@ class StudentAdmin(admin.ModelAdmin):
                 'has_scholarship',
                 'scholarship_type',
             ),
+        }),
+        ('Credenciales de Moodle', {
+            'fields': (
+                ('moodle_username', 'moodle_password'),
+            ),
+            'description': 'Credenciales para acceso a la plataforma Moodle (no para este sistema administrativo)',
         }),
         ('Información del Sistema', {
             'fields': (

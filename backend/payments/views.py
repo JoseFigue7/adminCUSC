@@ -18,6 +18,8 @@ from academics.models import Career
 from users.permissions import HasPermission
 from decimal import Decimal
 
+logger = logging.getLogger(__name__)
+
 
 class PaymentViewSet(viewsets.ModelViewSet):
     queryset = Payment.objects.all()
@@ -38,6 +40,11 @@ class PaymentViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         """Asignar automáticamente carrera y usuario creador al crear un pago"""
+        from decimal import Decimal
+        from django.core.exceptions import ValidationError
+        from rest_framework import status
+        from rest_framework.response import Response
+        
         # Obtener el estudiante para asignar su carrera
         student_id = serializer.validated_data.get('student')
         user = self.request.user if self.request.user.is_authenticated else None
@@ -49,20 +56,228 @@ class PaymentViewSet(viewsets.ModelViewSet):
             'created_by': user,
         }
         
-        # Pasar usuario para el historial de cambios
-        payment = serializer.save(**save_data)
-        payment._changed_by_user = user
-        payment._status_change_notes = 'Pago creado'
+        # Asegurarse de que payment_type esté cargado para que el modelo pueda verificar el código
+        payment_type_id = serializer.validated_data.get('payment_type')
+        if payment_type_id:
+            from .models import PaymentType
+            try:
+                payment_type = PaymentType.objects.select_for_update().get(id=payment_type_id)
+                # Asignar el objeto payment_type para que esté disponible en save()
+                serializer.validated_data['payment_type'] = payment_type
+            except PaymentType.DoesNotExist:
+                pass
         
-        # No establecer status aquí, el modelo lo maneja automáticamente
-        return payment
+        # Generar número de recibo automáticamente si es efectivo y no se proporcionó
+        payment_method = serializer.validated_data.get('payment_method', 'TRANSFERENCIA')
+        if payment_method == 'EFECTIVO' and not serializer.validated_data.get('receipt_number'):
+            from .receipt_utils import generate_receipt_number
+            serializer.validated_data['receipt_number'] = generate_receipt_number()
+        
+        # Pasar usuario para el historial de cambios
+        try:
+            payment = serializer.save(**save_data)
+            payment._changed_by_user = user
+            payment._status_change_notes = 'Pago creado'
+            
+            # Generar y enviar recibo automáticamente
+            try:
+                from .receipt_utils import generate_payment_receipt_pdf, send_receipt_email
+                pdf_file = generate_payment_receipt_pdf(payment)
+                send_receipt_email(payment, pdf_file)
+            except Exception as receipt_error:
+                logger.warning(f'Error al generar/enviar recibo automáticamente: {str(receipt_error)}')
+                # No fallar la creación del pago si hay error con el recibo
+            
+            # No establecer status aquí, el modelo lo maneja automáticamente
+            return payment
+        except Exception as e:
+            # Log el error completo para debugging
+            import logging
+            import traceback
+            from django.core.exceptions import ValidationError as DjangoValidationError
+            
+            logger = logging.getLogger(__name__)
+            error_type = type(e).__name__
+            error_message = str(e)
+            
+            logger.error(f"Error al crear pago: {error_type}: {error_message}")
+            logger.error(f"Traceback completo: {traceback.format_exc()}")
+            logger.error(f"Datos del serializer validados: {serializer.validated_data}")
+            logger.error(f"Save data adicional: {save_data}")
+            
+            # Si es un ValidationError de Django, extraer los mensajes
+            if isinstance(e, DjangoValidationError):
+                error_messages = e.messages if hasattr(e, 'messages') else [error_message]
+                error_dict = e.error_dict if hasattr(e, 'error_dict') else {}
+                logger.error(f"Mensajes de validación: {error_messages}")
+                logger.error(f"Dict de errores: {error_dict}")
+                
+                # Devolver un error más descriptivo
+                return Response(
+                    {
+                        'error': 'Error de validación al crear el pago',
+                        'details': error_messages,
+                        'error_dict': {str(k): v for k, v in error_dict.items()},
+                        'data': serializer.validated_data
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Re-raise el error para que Django REST Framework lo maneje
+            raise
+    
+    @action(detail=False, methods=['post'])
+    def create_enrollment_payment(self, request):
+        """
+        Endpoint específico para crear pagos de inscripción (100 y 101)
+        Maneja la lógica de forma más simple sin depender de _calculate_amounts()
+        """
+        from decimal import Decimal
+        from .models import Payment, PaymentType
+        from students.models import Student
+        from django.utils import timezone
+        
+        student_id = request.data.get('student')
+        payment_type_id = request.data.get('payment_type')
+        payment_method = request.data.get('payment_method', 'EFECTIVO')
+        original_amount = request.data.get('original_amount')
+        year = request.data.get('year')
+        month = request.data.get('month')
+        receipt_number = request.data.get('receipt_number', '')
+        
+        # Validaciones básicas
+        if not student_id:
+            return Response({'error': 'El estudiante es requerido'}, status=status.HTTP_400_BAD_REQUEST)
+        if not payment_type_id:
+            return Response({'error': 'El tipo de pago es requerido'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            student = Student.objects.get(id=student_id)
+            payment_type = PaymentType.objects.get(id=payment_type_id)
+        except Student.DoesNotExist:
+            return Response({'error': 'Estudiante no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        except PaymentType.DoesNotExist:
+            return Response({'error': 'Tipo de pago no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Validar que sea pago 100 o 101
+        if payment_type.code not in ['100', '101']:
+            return Response(
+                {'error': 'Este endpoint solo es para pagos de inscripción (100 o 101)'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Determinar el monto
+        if payment_type.code == '100':
+            # Pago 100 es gratis
+            amount_value = Decimal('0.00')
+            payment_method = 'EFECTIVO'  # Forzar efectivo para pago gratis
+        elif payment_type.code == '101':
+            # Pago 101 tiene costo
+            if original_amount:
+                try:
+                    amount_value = Decimal(str(original_amount))
+                except (ValueError, TypeError):
+                    return Response({'error': 'Monto inválido'}, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                # Obtener el monto de PaymentConfiguration
+                if not student.career:
+                    return Response(
+                        {'error': 'El estudiante no tiene una carrera asignada'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                try:
+                    from .models import PaymentConfiguration
+                    payment_config = PaymentConfiguration.objects.get(
+                        career=student.career,
+                        is_active=True
+                    )
+                    amount_value = payment_config.enrollment_fee or Decimal('0.00')
+                except PaymentConfiguration.DoesNotExist:
+                    return Response(
+                        {'error': f'No se encontró configuración de pago para la carrera {student.career.name}'},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+        else:
+            amount_value = Decimal('0.00')
+        
+        # Generar número de recibo automáticamente si es efectivo y no se proporcionó
+        if payment_method == 'EFECTIVO' and not receipt_number:
+            from .receipt_utils import generate_receipt_number
+            receipt_number = generate_receipt_number()
+        
+        # Crear el pago de forma simple
+        try:
+            payment = Payment.objects.create(
+                student=student,
+                career=student.career,
+                payment_type=payment_type,
+                payment_method=payment_method,
+                original_amount=amount_value,
+                final_amount=amount_value,
+                amount=amount_value,  # Para compatibilidad
+                scholarship_discount_amount=Decimal('0.00'),
+                penalty_amount=Decimal('0.00'),
+                year=year,
+                month=month,
+                payment_date=timezone.now().date(),
+                status='APROBADO' if payment_type.code == '100' or payment_method == 'EFECTIVO' else 'PENDIENTE',
+                receipt_number=receipt_number if payment_method == 'EFECTIVO' else '',
+                created_by=request.user if request.user.is_authenticated else None,
+                approved_by=request.user if (payment_type.code == '100' or payment_method == 'EFECTIVO') and request.user.is_authenticated else None,
+                approved_at=timezone.now() if (payment_type.code == '100' or payment_method == 'EFECTIVO') else None,
+            )
+            
+            # Generar y enviar recibo automáticamente
+            try:
+                from .receipt_utils import generate_payment_receipt_pdf, send_receipt_email
+                pdf_file = generate_payment_receipt_pdf(payment)
+                send_receipt_email(payment, pdf_file)
+            except Exception as receipt_error:
+                logger.warning(f'Error al generar/enviar recibo automáticamente: {str(receipt_error)}')
+                # No fallar la creación del pago si hay error con el recibo
+            
+            serializer = self.get_serializer(payment)
+            response_data = serializer.data
+            # Agregar información sobre el recibo generado
+            response_data['receipt_generated'] = True
+            response_data['receipt_number'] = payment.receipt_number
+            return Response(response_data, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            import logging
+            import traceback
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error al crear pago de inscripción: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return Response(
+                {'error': f'Error al crear el pago: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     def perform_update(self, serializer):
-        """Capturar usuario que realiza el cambio"""
+        """Capturar usuario que realiza el cambio y aprobar automáticamente pagos en efectivo"""
+        from django.utils import timezone
         user = self.request.user if self.request.user.is_authenticated else None
+        
+        # Obtener la instancia antes de guardar para verificar el método de pago
+        instance = self.get_object()
+        payment_method = serializer.validated_data.get('payment_method', instance.payment_method)
+        
+        # Guardar la instancia
         instance = serializer.save()
         instance._changed_by_user = user
         instance._status_change_notes = getattr(self.request.data, 'notes', '') or ''
+        
+        # Si el método de pago es EFECTIVO y el pago no está aprobado, aprobarlo automáticamente
+        if payment_method == 'EFECTIVO' and instance.status != 'APROBADO':
+            instance.status = 'APROBADO'
+            if not instance.approved_by:
+                instance.approved_by = user
+            if not instance.approved_at:
+                instance.approved_at = timezone.now()
+            instance._status_change_notes = 'Pago aprobado automáticamente (efectivo)'
+            instance.save()
+        
         return instance
     
     @action(detail=False, methods=['get'])
@@ -189,6 +404,160 @@ class PaymentViewSet(viewsets.ModelViewSet):
             'students': serializer.data
         })
     
+    @action(detail=False, methods=['get'])
+    def students_with_overdue(self, request):
+        """Obtener estudiantes con pagos vencidos (mora)"""
+        from django.db.models import Sum, Count
+        from decimal import Decimal
+        
+        today = date.today()
+        
+        # Obtener pagos vencidos (due_date < hoy y no aprobados)
+        overdue_payments = Payment.objects.filter(
+            due_date__lt=today,
+            status__in=['NO_PAGADO', 'MORA', 'PENDIENTE']
+        ).select_related('student', 'student__career')
+        
+        # Agrupar por estudiante y calcular totales
+        students_data = {}
+        for payment in overdue_payments:
+            student_id = str(payment.student.id)
+            if student_id not in students_data:
+                students_data[student_id] = {
+                    'student_id': student_id,
+                    'student_name': payment.student.get_full_name(),
+                    'student_phone': payment.student.phone,
+                    'total_overdue_amount': Decimal('0.00'),
+                    'overdue_payments_count': 0,
+                }
+            
+            # Sumar el monto final del pago vencido
+            payment_amount = payment.final_amount or payment.amount or Decimal('0.00')
+            students_data[student_id]['total_overdue_amount'] += payment_amount
+            students_data[student_id]['overdue_payments_count'] += 1
+        
+        # Convertir a lista y formatear
+        result = []
+        for student_data in students_data.values():
+            result.append({
+                'student_id': student_data['student_id'],
+                'student_name': student_data['student_name'],
+                'student_phone': student_data['student_phone'],
+                'total_overdue_amount': float(student_data['total_overdue_amount']),
+                'overdue_payments_count': student_data['overdue_payments_count'],
+            })
+        
+        # Ordenar por monto total descendente
+        result.sort(key=lambda x: x['total_overdue_amount'], reverse=True)
+        
+        return Response({
+            'count': len(result),
+            'students': result
+        })
+    
+    @action(detail=False, methods=['get'])
+    def find_oldest_unpaid(self, request):
+        """Buscar el pago más antiguo en estado NO_PAGADO o MORA para un estudiante y tipo de pago"""
+        student_id = request.query_params.get('student_id')
+        payment_type_id = request.query_params.get('payment_type_id')
+        
+        if not student_id or not payment_type_id:
+            return Response(
+                {'error': 'student_id y payment_type_id son requeridos'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Buscar el pago más antiguo en NO_PAGADO o MORA para este estudiante y tipo de pago
+        # Ordenar por due_date (más antigua primero), si no hay due_date, por payment_date
+        unpaid_payment = Payment.objects.filter(
+            student_id=student_id,
+            payment_type_id=payment_type_id,
+            status__in=['NO_PAGADO', 'MORA']  # Incluir también pagos en mora
+        ).order_by(
+            'due_date',  # Primero por fecha de vencimiento (más antigua)
+            'payment_date',  # Si no hay due_date, por fecha de pago
+            'created_at'  # Como último recurso, por fecha de creación
+        ).first()
+        
+        if not unpaid_payment:
+            return Response(
+                {'error': 'No se encontró ningún pago pendiente para este estudiante y tipo de pago'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Recalcular montos (por si hay mora que aplicar)
+        unpaid_payment.save()  # Esto recalcula automáticamente los montos
+        
+        # Serializar el pago encontrado
+        serializer = self.get_serializer(unpaid_payment)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'])
+    def get_payment_amount(self, request):
+        """Obtener el monto del pago basado en el estudiante y tipo de pago"""
+        student_id = request.query_params.get('student_id')
+        payment_type_id = request.query_params.get('payment_type_id')
+        
+        if not student_id or not payment_type_id:
+            return Response(
+                {'error': 'student_id y payment_type_id son requeridos'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            student = Student.objects.get(id=student_id)
+            payment_type = PaymentType.objects.get(id=payment_type_id)
+        except Student.DoesNotExist:
+            return Response(
+                {'error': 'Estudiante no encontrado'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except PaymentType.DoesNotExist:
+            return Response(
+                {'error': 'Tipo de pago no encontrado'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Si el tipo de pago tiene un monto fijo, devolverlo
+        if payment_type.amount is not None:
+            return Response({
+                'amount': float(payment_type.amount),
+                'original_amount': float(payment_type.amount),
+                'final_amount': float(payment_type.amount),
+            })
+        
+        # Si el tipo de pago es 101 (Inscripción al Cuatrimestre), obtener el monto de PaymentConfiguration
+        if payment_type.code == '101':
+            if not student.career:
+                return Response(
+                    {'error': 'El estudiante no tiene una carrera asignada'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            try:
+                payment_config = PaymentConfiguration.objects.get(
+                    career=student.career,
+                    is_active=True
+                )
+                enrollment_fee = payment_config.enrollment_fee or Decimal('0.00')
+                return Response({
+                    'amount': float(enrollment_fee),
+                    'original_amount': float(enrollment_fee),
+                    'final_amount': float(enrollment_fee),
+                })
+            except PaymentConfiguration.DoesNotExist:
+                return Response(
+                    {'error': f'No se encontró configuración de pago para la carrera {student.career.name}'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        
+        # Para otros tipos de pago sin monto fijo, devolver 0
+        return Response({
+            'amount': 0.0,
+            'original_amount': 0.0,
+            'final_amount': 0.0,
+        })
+    
     @action(detail=True, methods=['patch'])
     def approve(self, request, pk=None):
         """Aprobar un pago"""
@@ -286,6 +655,59 @@ class PaymentViewSet(viewsets.ModelViewSet):
         
         serializer = self.get_serializer(payment)
         return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    @action(detail=True, methods=['get'])
+    def download_receipt(self, request, pk=None):
+        """
+        Descargar el recibo de pago en PDF
+        """
+        payment = self.get_object()
+        
+        try:
+            from .receipt_utils import generate_payment_receipt_pdf
+            pdf_file = generate_payment_receipt_pdf(payment)
+            
+            filename = f'recibo_{payment.receipt_number or payment.id}_{payment.payment_date.strftime("%Y%m%d") if payment.payment_date else "N/A"}.pdf'
+            
+            response = HttpResponse(pdf_file.read(), content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+            
+        except Exception as e:
+            logger.error(f'Error al generar recibo PDF: {str(e)}', exc_info=True)
+            return Response(
+                {'error': f'Error al generar el recibo: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=True, methods=['post'])
+    def send_receipt_email(self, request, pk=None):
+        """
+        Enviar el recibo de pago por correo electrónico al estudiante
+        """
+        payment = self.get_object()
+        
+        try:
+            from .receipt_utils import send_receipt_email
+            success = send_receipt_email(payment)
+            
+            if success:
+                return Response(
+                    {'message': 'Recibo enviado por correo electrónico exitosamente'},
+                    status=status.HTTP_200_OK
+                )
+            else:
+                return Response(
+                    {'error': 'No se pudo enviar el recibo. Verifique que el estudiante tenga un correo electrónico válido.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+        except Exception as e:
+            logger.error(f'Error al enviar recibo por correo: {str(e)}', exc_info=True)
+            return Response(
+                {'error': f'Error al enviar el recibo: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     @action(detail=True, methods=['patch'])
     def update_reference(self, request, pk=None):
@@ -505,6 +927,77 @@ class PaymentViewSet(viewsets.ModelViewSet):
                 {'error': 'Error al calcular las estadísticas', 'detail': error_detail},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+    
+    @action(detail=False, methods=['get'], url_path='export/csv')
+    def export_csv(self, request):
+        """Exportar pagos filtrados a CSV"""
+        from django.http import HttpResponse
+        import csv
+        
+        # Obtener queryset filtrado usando el mismo filtro que list
+        queryset = self.filter_queryset(self.get_queryset())
+        
+        # Aplicar ordenamiento si existe
+        ordering = request.query_params.get('ordering', '-payment_date')
+        if ordering:
+            queryset = queryset.order_by(*ordering.split(','))
+        
+        # Crear respuesta CSV
+        response = HttpResponse(content_type='text/csv; charset=utf-8')
+        response['Content-Disposition'] = f'attachment; filename="pagos_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv"'
+        
+        writer = csv.writer(response)
+        
+        # Escribir encabezados
+        writer.writerow([
+            'ID',
+            'Estudiante',
+            'Carnet',
+            'Tipo de Pago',
+            'Código Tipo',
+            'Monto',
+            'Monto Original',
+            'Descuento Beca',
+            'Mora',
+            'Mes',
+            'Año',
+            'Estado',
+            'Método de Pago',
+            'Fecha de Pago',
+            'Referencia',
+            'Número de Recibo',
+            'Carrera',
+            'Fecha de Creación',
+            'Aprobado por',
+            'Fecha de Aprobación'
+        ])
+        
+        # Escribir datos
+        for payment in queryset.select_related('student', 'payment_type', 'career', 'approved_by'):
+            writer.writerow([
+                str(payment.id),
+                payment.student.get_full_name() if payment.student else '',
+                payment.student.carnet if payment.student else '',
+                payment.payment_type.name if payment.payment_type else '',
+                payment.payment_type.code if payment.payment_type else '',
+                str(payment.final_amount or payment.amount or '0.00'),
+                str(payment.original_amount or payment.amount or '0.00'),
+                str(payment.scholarship_discount_amount or '0.00'),
+                str(payment.penalty_amount or '0.00'),
+                payment.get_month_display() if payment.month else '',
+                str(payment.year) if payment.year else '',
+                payment.get_status_display(),
+                payment.get_payment_method_display(),
+                payment.payment_date.strftime('%Y-%m-%d') if payment.payment_date else '',
+                payment.payment_reference or '',
+                payment.receipt_number or '',
+                payment.career.name if payment.career else '',
+                payment.created_at.strftime('%Y-%m-%d %H:%M:%S') if payment.created_at else '',
+                payment.approved_by.get_full_name() if payment.approved_by else '',
+                payment.approved_at.strftime('%Y-%m-%d %H:%M:%S') if payment.approved_at else '',
+            ])
+        
+        return response
     
     @action(detail=False, methods=['get'])
     def my_accounting(self, request):
@@ -852,7 +1345,15 @@ class PaymentViewSet(viewsets.ModelViewSet):
 class ScholarshipViewSet(viewsets.ModelViewSet):
     queryset = Scholarship.objects.all()
     serializer_class = ScholarshipSerializer
-    permission_classes = [permissions.IsAuthenticated, HasPermission('manage_scholarships')]
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_permissions(self):
+        """Permisos específicos por acción"""
+        if self.action in ['list', 'retrieve']:
+            # Permitir ver a usuarios autenticados
+            return [permissions.IsAuthenticated()]
+        # Para crear/editar/eliminar requiere permiso específico
+        return [permissions.IsAuthenticated(), HasPermission('manage_scholarships')]
     
     def create(self, request, *args, **kwargs):
         """Crear beca y verificar límites por facultad"""
@@ -888,7 +1389,15 @@ class ScholarshipViewSet(viewsets.ModelViewSet):
 class PaymentConfigurationViewSet(viewsets.ModelViewSet):
     queryset = PaymentConfiguration.objects.filter(is_active=True)
     serializer_class = PaymentConfigurationSerializer
-    permission_classes = [permissions.IsAuthenticated, HasPermission('manage_settings')]
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_permissions(self):
+        """Permisos específicos por acción"""
+        if self.action in ['list', 'retrieve']:
+            # Permitir ver a usuarios autenticados
+            return [permissions.IsAuthenticated()]
+        # Para crear/editar/eliminar requiere permiso específico
+        return [permissions.IsAuthenticated(), HasPermission('manage_settings')]
 
 
 class PaymentTypeViewSet(viewsets.ReadOnlyModelViewSet):

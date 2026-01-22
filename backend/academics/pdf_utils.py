@@ -32,11 +32,16 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
         cuatrimestre = cuatrimestre_enrollment.cuatrimestre
         career = cuatrimestre.career
         
-        # Cargar el logo en base64 para marca de agua
+        # Cargar el logo en base64 para marca de agua desde frontend/public/SC Logo.png
         logo_base64 = None
         try:
-            logo_path = os.path.join(settings.BASE_DIR, 'students', 'static', 'students', 'contracts', 'logo.png')
-            if os.path.exists(logo_path):
+            # Intentar usar el logo desde frontend/public/SC Logo.png
+            logo_path = settings.BASE_DIR.parent / 'frontend' / 'public' / 'SC Logo.png'
+            if not logo_path.exists():
+                # Fallback al logo anterior si no existe el nuevo
+                logo_path = os.path.join(settings.BASE_DIR, 'students', 'static', 'students', 'contracts', 'logo.png')
+            
+            if logo_path.exists():
                 with open(logo_path, 'rb') as logo_file:
                     logo_data = logo_file.read()
                     logo_base64 = base64.b64encode(logo_data).decode('utf-8')
@@ -65,6 +70,20 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
             ).prefetch_related('course__schedules').all()
             courses = [enrollment.course for enrollment in course_enrollments]
         
+        # Calcular costos de colegiatura
+        from payments.models import PaymentConfiguration
+        base_tuition = Decimal('0.00')
+        try:
+            payment_config = PaymentConfiguration.objects.get(
+                career=career,
+                is_active=True
+            )
+            base_tuition = payment_config.monthly_amount or Decimal('0.00')
+        except PaymentConfiguration.DoesNotExist:
+            logger.warning(f'No se encontró configuración de pago para la carrera {career.name}')
+        
+        total_course_cost = Decimal('0.00')
+        
         for course in courses:
             schedules = [
                 {
@@ -75,14 +94,34 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
                 for schedule in course.schedules.all()
             ]
             
+            course_cost = course.cost or Decimal('0.00')
+            total_course_cost += course_cost
             total_credits += course.credits
             
             courses_data.append({
                 'code': course.code,
                 'name': course.name,
                 'credits': course.credits,
+                'cost': course_cost,
                 'schedules': schedules
             })
+        
+        # Calcular colegiatura total mensual
+        total_monthly_tuition = base_tuition + total_course_cost
+        
+        # Verificar si el estudiante tiene beca activa para determinar el código de pago
+        scholarship = getattr(student, 'scholarship', None)
+        scholarship_type = None
+        payment_code = '102'  # Por defecto sin beca
+        
+        if scholarship and scholarship.status == 'ACTIVA':
+            scholarship_type = scholarship.scholarship_type
+            if scholarship_type == 'COMPLETA':
+                payment_code = '105'
+                total_monthly_tuition = Decimal('0.00')  # Beca completa es 0
+            elif scholarship_type == 'MEDIA':
+                payment_code = '103'
+                total_monthly_tuition = total_monthly_tuition * Decimal('0.50')  # 50% de descuento
         
         # Formatear fecha
         months_es = {
@@ -141,29 +180,25 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
                 </div>
                 
                 <div class="info-section">
-                    <div class="info-row">
-                        <span class="info-label">Estudiante:</span>
-                        <span>{full_name}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Carnet:</span>
-                        <span>{carnet}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Carrera:</span>
-                        <span>{career}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Cuatrimestre:</span>
-                        <span>{cuatrimestre}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Año Académico:</span>
-                        <span>{academic_year}</span>
-                    </div>
-                    <div class="info-row">
-                        <span class="info-label">Período:</span>
-                        <span>{period}</span>
+                    <div class="info-grid">
+                        <div class="info-row">
+                            <div class="info-cell info-label">Estudiante:</div>
+                            <div class="info-cell info-value">{full_name}</div>
+                            <div class="info-cell info-label" style="padding-left: 20px;">Carnet:</div>
+                            <div class="info-cell info-value">{carnet}</div>
+                        </div>
+                        <div class="info-row">
+                            <div class="info-cell info-label">Carrera:</div>
+                            <div class="info-cell info-value">{career}</div>
+                            <div class="info-cell info-label" style="padding-left: 20px;">Cuatrimestre:</div>
+                            <div class="info-cell info-value">{cuatrimestre}</div>
+                        </div>
+                        <div class="info-row">
+                            <div class="info-cell info-label">Año Académico:</div>
+                            <div class="info-cell info-value">{academic_year}</div>
+                            <div class="info-cell info-label" style="padding-left: 20px;">Período:</div>
+                            <div class="info-cell info-value">{period}</div>
+                        </div>
                     </div>
                 </div>
                 
@@ -187,6 +222,17 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
                     </tbody>
                 </table>
                 
+                <div class="tuition-section">
+                    <div class="tuition-row">
+                        <span class="tuition-label">Código de Pago:</span>
+                        <span class="tuition-value"><strong>{payment_code}</strong></span>
+                    </div>
+                    <div class="tuition-row total-tuition-row">
+                        <span class="tuition-label"><strong>Colegiatura:</strong></span>
+                        <span class="tuition-value"><strong>${total_monthly_tuition:,.2f}</strong></span>
+                    </div>
+                </div>
+                
                 <div class="signature-section">
                     <p class="signature-label">Firma del Estudiante</p>
                     <div class="signature-line"></div>
@@ -196,6 +242,7 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
         
         # Generar filas de cursos
         courses_rows_html = ""
+        
         for course in courses_data:
             schedules_str = ', '.join([
                 f"{s['day']} {s['start_time']}-{s['end_time']}"
@@ -223,7 +270,9 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
             academic_year=context['academic_year'],
             period=context['period'],
             courses_rows=courses_rows_html,
-            total_credits=total_credits
+            total_credits=total_credits,
+            payment_code=payment_code,
+            total_monthly_tuition=total_monthly_tuition
         )
         
         # Estilos de marca de agua
@@ -318,15 +367,30 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
                 .info-section {{
                     margin-bottom: 6px;
                 }}
+                .info-grid {{
+                    display: table;
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-bottom: 5px;
+                }}
                 .info-row {{
-                    margin-bottom: 3px;
+                    display: table-row;
+                    margin-bottom: 2px;
                     font-size: 8pt;
                     line-height: 1.2;
                 }}
+                .info-cell {{
+                    display: table-cell;
+                    padding: 2px 8px 2px 0;
+                    vertical-align: top;
+                }}
                 .info-label {{
                     font-weight: bold;
-                    display: inline-block;
-                    width: 110px;
+                    width: 100px;
+                    color: #333;
+                }}
+                .info-value {{
+                    color: #000;
                 }}
                 .courses-title {{
                     font-size: 9pt;
@@ -359,6 +423,26 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
                 .total-row {{
                     font-weight: bold;
                     background-color: #f8f9fa;
+                }}
+                .tuition-section {{
+                    margin-top: 8px;
+                    margin-bottom: 5px;
+                }}
+                .tuition-row {{
+                    display: flex;
+                    justify-content: space-between;
+                    font-size: 9pt;
+                    padding: 3px 0;
+                }}
+                .tuition-label {{
+                    font-weight: bold;
+                }}
+                .tuition-value {{
+                    font-weight: bold;
+                    color: #000000;
+                }}
+                .total-tuition-row {{
+                    font-size: 10pt;
                 }}
                 .signature-section {{
                     margin-top: 10px;
@@ -418,13 +502,18 @@ def generate_payment_voucher(cuatrimestre_enrollment):
         cuatrimestre = cuatrimestre_enrollment.cuatrimestre
         career = cuatrimestre.career
         
-        # Obtener pagos mensuales relacionados
+        # Obtener pagos mensuales de colegiatura (códigos 102, 103, 105)
+        from payments.models import PaymentType
+        tuition_payment_codes = ['102', '103', '105']
+        tuition_payment_types = PaymentType.objects.filter(code__in=tuition_payment_codes, is_active=True)
+        
         payments = Payment.objects.filter(
-            cuatrimestre_enrollment=cuatrimestre_enrollment
+            cuatrimestre_enrollment=cuatrimestre_enrollment,
+            payment_type__in=tuition_payment_types
         ).order_by('month', 'year').all()
         
         if not payments.exists():
-            raise ValueError('No hay pagos generados para este cuatrimestre')
+            raise ValueError('No hay pagos de colegiatura generados para este cuatrimestre')
         
         # Formatear fecha
         months_es = {
@@ -454,11 +543,15 @@ def generate_payment_voucher(cuatrimestre_enrollment):
             amount = payment.final_amount or payment.amount
             total_amount += amount
             
+            # Obtener código de tipo de pago
+            payment_code = payment.payment_type.code if payment.payment_type else 'N/A'
+            
             payments_data.append({
                 'month': month_name,
                 'year': payment.year or cuatrimestre_enrollment.academic_year,
                 'due_date': due_date_str,
                 'amount': amount,
+                'payment_code': payment_code,
                 'payment_id': str(payment.id)[:8],  # Primeros 8 caracteres del UUID
                 'reference': payment.payment_reference or f"PAGO-{payment.id}"
             })
@@ -495,12 +588,12 @@ def generate_payment_voucher(cuatrimestre_enrollment):
             <style>
                 @page {{
                     size: letter;
-                    margin: 2cm;
+                    margin: 1.5cm;
                 }}
                 body {{
                     font-family: Arial, sans-serif;
-                    font-size: 11pt;
-                    line-height: 1.4;
+                    font-size: 10pt;
+                    line-height: 1.3;
                     position: relative;
                 }}
                 .watermark {{
@@ -523,46 +616,64 @@ def generate_payment_voucher(cuatrimestre_enrollment):
                 }}
                 .header {{
                     text-align: center;
-                    margin-bottom: 30px;
+                    margin-bottom: 15px;
                     border-bottom: 2px solid #333;
-                    padding-bottom: 15px;
+                    padding-bottom: 8px;
                 }}
                 .header h1 {{
-                    font-size: 18pt;
+                    font-size: 16pt;
                     font-weight: bold;
                     margin: 0;
                 }}
                 .header h2 {{
-                    font-size: 14pt;
+                    font-size: 12pt;
                     font-weight: normal;
-                    margin: 5px 0;
+                    margin: 3px 0;
                 }}
                 .info-section {{
-                    margin-bottom: 20px;
+                    margin-bottom: 12px;
+                }}
+                .info-grid {{
+                    display: table;
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-bottom: 8px;
                 }}
                 .info-row {{
-                    margin-bottom: 8px;
+                    display: table-row;
+                }}
+                .info-cell {{
+                    display: table-cell;
+                    padding: 2px 8px 2px 0;
+                    vertical-align: top;
+                    font-size: 9pt;
                 }}
                 .info-label {{
                     font-weight: bold;
-                    display: inline-block;
-                    width: 150px;
+                    width: 120px;
+                    color: #333;
+                }}
+                .info-value {{
+                    color: #000;
                 }}
                 table {{
                     width: 100%;
                     border-collapse: collapse;
-                    margin: 20px 0;
+                    margin: 12px 0;
+                    font-size: 9pt;
                 }}
                 table th {{
                     background-color: #f8f9fa;
                     border: 1px solid #dee2e6;
-                    padding: 10px;
+                    padding: 6px;
                     text-align: left;
                     font-weight: bold;
+                    font-size: 9pt;
                 }}
                 table td {{
                     border: 1px solid #dee2e6;
-                    padding: 8px;
+                    padding: 5px;
+                    font-size: 9pt;
                 }}
                 .total-row {{
                     font-weight: bold;
@@ -591,55 +702,52 @@ def generate_payment_voucher(cuatrimestre_enrollment):
             </div>
             
             <div class="info-section">
-                <div class="info-row">
-                    <span class="info-label">Estudiante:</span>
-                    <span>{student.get_full_name()}</span>
-                </div>
-                <div class="info-row">
-                    <span class="info-label">Carnet:</span>
-                    <span>{student.carnet or 'N/A'}</span>
-                </div>
-                <div class="info-row">
-                    <span class="info-label">Carrera:</span>
-                    <span>{career.name}</span>
-                </div>
-                <div class="info-row">
-                    <span class="info-label">Cuatrimestre:</span>
-                    <span>{cuatrimestre.name}</span>
-                </div>
-                <div class="info-row">
-                    <span class="info-label">Año Académico:</span>
-                    <span>{cuatrimestre_enrollment.academic_year}</span>
-                </div>
-                <div class="info-row">
-                    <span class="info-label">Período:</span>
-                    <span>{period_name}</span>
+                <div class="info-grid">
+                    <div class="info-row">
+                        <div class="info-cell info-label">Estudiante:</div>
+                        <div class="info-cell info-value">{student.get_full_name()}</div>
+                        <div class="info-cell info-label" style="padding-left: 30px;">Carnet:</div>
+                        <div class="info-cell info-value">{student.carnet or 'N/A'}</div>
+                    </div>
+                    <div class="info-row">
+                        <div class="info-cell info-label">Carrera:</div>
+                        <div class="info-cell info-value">{career.name}</div>
+                        <div class="info-cell info-label" style="padding-left: 30px;">Cuatrimestre:</div>
+                        <div class="info-cell info-value">{cuatrimestre.name}</div>
+                    </div>
+                    <div class="info-row">
+                        <div class="info-cell info-label">Año Académico:</div>
+                        <div class="info-cell info-value">{cuatrimestre_enrollment.academic_year}</div>
+                        <div class="info-cell info-label" style="padding-left: 30px;">Período:</div>
+                        <div class="info-cell info-value">{period_name}</div>
+                    </div>
                 </div>
             </div>
             
             {f'''
-            <div style="margin-top: 25px; padding: 15px; background-color: #e7f3ff; border: 2px solid #2196F3; border-radius: 5px;">
-                <h4 style="margin-top: 0; color: #1565C0; font-size: 12pt;">Acceso a Plataforma</h4>
-                <div style="margin-top: 10px;">
-                    <div class="info-row" style="margin-bottom: 8px;">
-                        <span class="info-label" style="font-weight: bold; color: #1565C0;">Usuario:</span>
-                        <span style="font-family: monospace; font-size: 11pt; font-weight: bold;">{student.moodle_username or 'N/A'}</span>
-                    </div>
-                    <div class="info-row" style="margin-bottom: 0;">
-                        <span class="info-label" style="font-weight: bold; color: #1565C0;">Contraseña:</span>
-                        <span style="font-family: monospace; font-size: 11pt; font-weight: bold;">{student.moodle_password or 'N/A'}</span>
-                    </div>
-                </div>
-                <p style="margin-top: 10px; margin-bottom: 0; font-size: 9pt; color: #1565C0; font-style: italic;">
-                    Estas credenciales son para acceder a la plataforma Moodle. No son para este sistema administrativo.
+            <div style="margin-top: 12px; margin-bottom: 12px;">
+                <p style="margin: 3px 0; font-size: 9pt;">
+                    <strong>Usuario:</strong> <strong style="font-family: monospace;">{student.moodle_username or 'N/A'}</strong> | 
+                    <strong>Contraseña:</strong> <strong style="font-family: monospace;">{student.moodle_password or 'N/A'}</strong>
                 </p>
             </div>
             ''' if (student.moodle_username and student.moodle_password) else ''}
             
-            <h3 style="margin-top: 30px;">Pagos Mensuales</h3>
+            <div style="margin-top: 12px; margin-bottom: 12px;">
+                <p style="margin: 2px 0; font-size: 9pt; font-weight: bold;">Información Bancaria:</p>
+                <p style="margin: 2px 0; font-size: 9pt;">
+                    <strong>Nombre o Razón Social:</strong> Centro de Capacitación Santa Cecilia S.C. | 
+                    <strong>Banco:</strong> Banco Santander | 
+                    <strong>No. Cuenta:</strong> 65-50781653-0 | 
+                    <strong>Clave:</strong> 014180655078165306
+                </p>
+            </div>
+            
+            <h3 style="margin-top: 15px; margin-bottom: 8px; font-size: 11pt;">Pagos Mensuales</h3>
             <table>
                 <thead>
                     <tr>
+                        <th>Código</th>
                         <th>Mes</th>
                         <th>Año</th>
                         <th>Fecha Límite</th>
@@ -652,6 +760,7 @@ def generate_payment_voucher(cuatrimestre_enrollment):
         for payment_data in payments_data:
             html_string += f"""
                     <tr>
+                        <td style="font-weight: bold;">{payment_data['payment_code']}</td>
                         <td>{payment_data['month']}</td>
                         <td>{payment_data['year']}</td>
                         <td>{payment_data['due_date']}</td>
@@ -661,25 +770,22 @@ def generate_payment_voucher(cuatrimestre_enrollment):
         
         html_string += f"""
                     <tr class="total-row">
-                        <td colspan="3"><strong>TOTAL</strong></td>
+                        <td colspan="4"><strong>TOTAL</strong></td>
                         <td><strong>${total_amount:,.2f}</strong></td>
                     </tr>
                 </tbody>
             </table>
             
-            <div style="margin-top: 20px; padding: 10px; border: 1px solid #dee2e6; border-radius: 4px; background-color: #f8f9fa;">
-                <p style="margin: 0; font-size: 9pt; color: #495057; line-height: 1.5;">
-                    <strong>Descuento por Pago Completo:</strong> Si realiza el pago completo del cuatrimestre, obtendrá un 10% de descuento. 
-                    Total sin descuento: <strong>${total_amount:,.2f}</strong> | 
-                    Descuento (10%): <strong>${discount_amount:,.2f}</strong> | 
-                    <strong>Total con descuento: ${total_with_discount:,.2f}</strong>. 
-                    Para aplicar este descuento, contacte a la administración antes de realizar los pagos.
+            <div style="margin-top: 12px; margin-bottom: 8px;">
+                <p style="margin: 0; font-size: 8pt; line-height: 1.3;">
+                    <strong>Descuento por Pago Completo (10%):</strong> Total sin descuento: <strong>${total_amount:,.2f}</strong> | 
+                    Descuento: <strong>${discount_amount:,.2f}</strong> | 
+                    <strong>Total con descuento: ${total_with_discount:,.2f}</strong>
                 </p>
             </div>
             
-            <div class="footer">
-                <p>Este talonario contiene los pagos mensuales del cuatrimestre.</p>
-                <p>Generado el {date_formatted}</p>
+            <div class="footer" style="margin-top: 10px;">
+                <p style="margin: 2px 0; font-size: 8pt;">Generado el {date_formatted}</p>
             </div>
         </body>
         </html>

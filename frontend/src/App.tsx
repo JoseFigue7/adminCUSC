@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
-import { FiHome, FiUsers, FiDollarSign, FiBook, FiAward, FiBarChart2, FiLogOut, FiUser } from './utils/icons';
+import { FiHome, FiUsers, FiDollarSign, FiBook, FiAward, FiLogOut, FiUser, FiDownload } from './utils/icons';
 import Dashboard from './components/Dashboard';
 import StudentList from './components/StudentList';
 import StudentForm from './components/StudentForm';
@@ -17,7 +17,7 @@ import CareerPensum from './components/CareerPensum';
 import GraduationMethodManagement from './components/GraduationMethodManagement';
 import GradeUpload from './components/GradeUpload';
 import ScholarshipManagement from './components/ScholarshipManagement';
-import Reports from './components/Reports';
+import ExportStudents from './components/ExportStudents';
 import Login from './components/Login';
 import Register from './components/Register';
 import UserProfile from './components/UserProfile';
@@ -57,8 +57,8 @@ const Navigation: React.FC = () => {
       <Link to="/scholarships" className={isActive('/scholarships') ? 'active' : ''}>
         <FiAward /> Becas
       </Link>
-      <Link to="/reports" className={isActive('/reports') ? 'active' : ''}>
-        <FiBarChart2 /> Reportes
+      <Link to="/exports" className={isActive('/exports') ? 'active' : ''}>
+        <FiDownload /> Exportación
       </Link>
     </nav>
   );
@@ -176,7 +176,7 @@ function AppContent() {
             <Route path="/careers/:id/pensum" element={<ProtectedRoute requirePermission="manage_academics"><CareerPensum /></ProtectedRoute>} />
             <Route path="/graduation-method" element={<ProtectedRoute requirePermission="manage_thesis"><GraduationMethodManagement /></ProtectedRoute>} />
             <Route path="/scholarships" element={<ProtectedRoute requirePermission="manage_scholarships"><ScholarshipManagement /></ProtectedRoute>} />
-            <Route path="/reports" element={<ProtectedRoute requirePermission="view_reports"><Reports /></ProtectedRoute>} />
+            <Route path="/exports" element={<ProtectedRoute requirePermission="manage_students"><ExportStudents /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </AppLayout>

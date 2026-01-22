@@ -24,6 +24,65 @@ class PaymentSerializer(serializers.ModelSerializer):
         model = Payment
         fields = '__all__'
     
+    def validate(self, data):
+        """
+        Validación personalizada para asegurar que amount tenga un valor
+        si original_amount o final_amount están presentes
+        """
+        from decimal import Decimal
+        
+        # Asegurar que los campos Decimal sean Decimal, no float o string
+        for field in ['amount', 'original_amount', 'final_amount', 'scholarship_discount_amount', 'penalty_amount']:
+            if field in data and data[field] is not None:
+                if not isinstance(data[field], Decimal):
+                    try:
+                        data[field] = Decimal(str(data[field]))
+                    except (ValueError, TypeError):
+                        pass
+        
+        # Si amount no está presente o es None/vacío, establecer basado en otros campos
+        if 'amount' not in data or data.get('amount') is None or data.get('amount') == '':
+            if 'final_amount' in data and data.get('final_amount') is not None:
+                data['amount'] = data['final_amount']
+            elif 'original_amount' in data and data.get('original_amount') is not None:
+                data['amount'] = data['original_amount']
+            else:
+                # Si no hay ningún monto, establecer en 0
+                data['amount'] = Decimal('0.00')
+        
+        # Asegurar que amount siempre tenga un valor válido (no None, no vacío)
+        if 'amount' in data:
+            if data['amount'] is None or data['amount'] == '':
+                if 'final_amount' in data and data.get('final_amount') is not None:
+                    data['amount'] = data['final_amount']
+                elif 'original_amount' in data and data.get('original_amount') is not None:
+                    data['amount'] = data['original_amount']
+                else:
+                    data['amount'] = Decimal('0.00')
+        
+        return data
+    
+    def create(self, validated_data):
+        """
+        Crear un pago asegurándonos de que amount tenga un valor
+        """
+        from decimal import Decimal
+        
+        # Asegurar que amount tenga un valor antes de crear
+        if 'amount' not in validated_data or validated_data.get('amount') is None:
+            if 'final_amount' in validated_data and validated_data.get('final_amount') is not None:
+                validated_data['amount'] = validated_data['final_amount']
+            elif 'original_amount' in validated_data and validated_data.get('original_amount') is not None:
+                validated_data['amount'] = validated_data['original_amount']
+            else:
+                validated_data['amount'] = Decimal('0.00')
+        
+        # Convertir a Decimal si es necesario
+        if 'amount' in validated_data and not isinstance(validated_data['amount'], Decimal):
+            validated_data['amount'] = Decimal(str(validated_data['amount']))
+        
+        return super().create(validated_data)
+    
     def get_total_amount(self, obj):
         """
         Retorna el monto total del pago.

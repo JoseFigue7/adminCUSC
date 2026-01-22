@@ -74,6 +74,8 @@ const CuatrimestreEnrollment: React.FC = () => {
     payment_reference: '',
     transfer_receipt: null as File | null
   });
+  const [canCreateEnrollment, setCanCreateEnrollment] = useState(false);
+  const [checkingEnrollmentPermission, setCheckingEnrollmentPermission] = useState(false);
 
   useEffect(() => {
     if (studentId) {
@@ -88,14 +90,18 @@ const CuatrimestreEnrollment: React.FC = () => {
     }
     setLoading(true);
     try {
-      const [studentRes, enrollmentsRes] = await Promise.all([
+      const [studentRes, enrollmentsRes, canCreateRes] = await Promise.all([
         getStudent(studentId),
-        academicsApi.getCuatrimestreEnrollments({ student_id: studentId })
+        academicsApi.getCuatrimestreEnrollments({ student_id: studentId }),
+        academicsApi.canCreateEnrollment(studentId).catch(() => ({ data: { can_create: false, has_approved_payment: false } }))
       ]);
 
       setStudent(studentRes.data);
       const enrollments = enrollmentsRes.data.results || enrollmentsRes.data;
       setEnrollments(enrollments);
+      
+      // Verificar si puede crear nueva inscripción
+      setCanCreateEnrollment(canCreateRes.data.can_create || false);
 
       // Cargar cuatrimestres de la carrera
       if (studentRes.data.career) {
@@ -285,7 +291,18 @@ const CuatrimestreEnrollment: React.FC = () => {
               <FiArrowLeft /> Volver
             </button>
             <button 
-              onClick={() => {
+              onClick={async () => {
+                if (!canCreateEnrollment && !showForm) {
+                  // Obtener información actualizada sobre los pagos disponibles
+                  try {
+                    const canCreateRes = await academicsApi.canCreateEnrollment(studentId!);
+                    const availableCodes = canCreateRes.data.available_payment_codes || ['101'];
+                    error(`Debe realizar y aprobar el pago de inscripción (${availableCodes.join(' o ')}) antes de crear una nueva inscripción`);
+                  } catch (err) {
+                    error('Debe realizar y aprobar el pago de inscripción (100 o 101) antes de crear una nueva inscripción');
+                  }
+                  return;
+                }
                 setShowForm(!showForm);
                 setEditingId(null);
                 setFormData({
@@ -294,7 +311,9 @@ const CuatrimestreEnrollment: React.FC = () => {
                   notes: ''
                 });
               }}
-              className="btn btn-primary btn-large"
+              className={`btn btn-primary btn-large ${!canCreateEnrollment && !showForm ? 'disabled' : ''}`}
+              disabled={!canCreateEnrollment && !showForm}
+              title={!canCreateEnrollment && !showForm ? 'Debe pagar una inscripción primero' : showForm ? 'Cancelar' : 'Nueva Inscripción'}
             >
               <FiPlus /> {showForm ? 'Cancelar' : 'Nueva Inscripción'}
             </button>

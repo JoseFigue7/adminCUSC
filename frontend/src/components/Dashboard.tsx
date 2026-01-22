@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { getStudents, getPayments, getCareers } from '../services/api';
-import { FiUsers, FiDollarSign, FiBook, FiTrendingUp, FiAlertCircle, FiCheckCircle, FiHome } from '../utils/icons';
+import { getStudents, getPayments, getCareers, getStudentsWithOverdue } from '../services/api';
+import { FiUsers, FiDollarSign, FiBook, FiTrendingUp, FiAlertCircle, FiCheckCircle, FiHome, FiPhone } from '../utils/icons';
 import './shared.css';
 import './Dashboard.css';
 
@@ -11,6 +11,14 @@ interface DashboardStats {
   totalPayments: number;
   pendingPayments: number;
   totalCareers: number;
+}
+
+interface StudentWithOverdue {
+  student_id: string;
+  student_name: string;
+  student_phone: string;
+  total_overdue_amount: number;
+  overdue_payments_count: number;
 }
 
 const Dashboard: React.FC = () => {
@@ -24,6 +32,7 @@ const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [recentStudents, setRecentStudents] = useState<any[]>([]);
   const [recentPayments, setRecentPayments] = useState<any[]>([]);
+  const [studentsWithOverdue, setStudentsWithOverdue] = useState<StudentWithOverdue[]>([]);
 
   useEffect(() => {
     loadDashboardData();
@@ -31,14 +40,17 @@ const Dashboard: React.FC = () => {
 
   const loadDashboardData = async () => {
     try {
-      const [studentsRes, paymentsRes, careersRes] = await Promise.all([
+      const [studentsRes, paymentsRes, approvedPaymentsRes, careersRes, overdueRes] = await Promise.all([
         getStudents(),
         getPayments(),
+        getPayments({ status: 'APROBADO', page_size: 5 }), // Solo pagos aprobados para la sección de recientes
         getCareers(),
+        getStudentsWithOverdue(),
       ]);
 
       const students = studentsRes.data.results || studentsRes.data;
       const payments = paymentsRes.data.results || paymentsRes.data;
+      const approvedPayments = approvedPaymentsRes.data.results || approvedPaymentsRes.data;
       const careers = careersRes.data.results || careersRes.data;
 
       const activeStudents = students.filter((s: any) => s.is_active).length;
@@ -55,7 +67,13 @@ const Dashboard: React.FC = () => {
       });
 
       setRecentStudents(students.slice(0, 5));
-      setRecentPayments(payments.slice(0, 5));
+      // Solo mostrar pagos aprobados (ingresos reales) en pagos recientes
+      setRecentPayments(approvedPayments.slice(0, 5));
+      
+      // Cargar estudiantes con mora
+      if (overdueRes.data && overdueRes.data.students) {
+        setStudentsWithOverdue(overdueRes.data.students);
+      }
     } catch (error) {
       console.error('Error loading dashboard data:', error);
     } finally {
@@ -128,6 +146,59 @@ const Dashboard: React.FC = () => {
       </div>
 
       <div className="dashboard-grid">
+        <div className="dashboard-card">
+          <div className="card-header">
+            <h2>
+              <FiAlertCircle className="card-icon" style={{ color: 'var(--danger-color)' }} />
+              Estudiantes con Mora
+            </h2>
+            <Link to="/payments" className="view-all-link">
+              Ver todos <FiTrendingUp />
+            </Link>
+          </div>
+          <div className="card-content">
+            {studentsWithOverdue.length > 0 ? (
+              <table className="recent-table">
+                <thead>
+                  <tr>
+                    <th>Nombre</th>
+                    <th>Teléfono</th>
+                    <th>Total Vencido</th>
+                    <th>Pagos</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {studentsWithOverdue.map((student) => (
+                    <tr key={student.student_id}>
+                      <td style={{ fontWeight: 600 }}>{student.student_name}</td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <FiPhone style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }} />
+                          {student.student_phone}
+                        </div>
+                      </td>
+                      <td className="amount-cell" style={{ color: 'var(--danger-color)' }}>
+                        MX${student.total_overdue_amount.toFixed(2)}
+                      </td>
+                      <td>
+                        <span className="status-badge" style={{ 
+                          background: 'var(--danger-light)', 
+                          color: 'var(--danger-dark)',
+                          border: '1px solid var(--danger-color)'
+                        }}>
+                          {student.overdue_payments_count} {student.overdue_payments_count === 1 ? 'pago' : 'pagos'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="empty-state">No hay estudiantes con pagos vencidos</p>
+            )}
+          </div>
+        </div>
+
         <div className="dashboard-card">
           <div className="card-header">
             <h2>

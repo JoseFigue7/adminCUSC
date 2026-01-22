@@ -20,6 +20,29 @@ class Command(BaseCommand):
                 'requires_quantity': False,
             },
             {
+                'code': '100',
+                'name': 'Inscripción al Cuatrimestre - Gratis',
+                'description': 'Inscripción al cuatrimestre gratuita (solo disponible en temporadas específicas)',
+                'amount': Decimal('0.00'),  # Siempre es 0 para inscripción gratis
+                'requires_career': False,
+                'requires_semester': False,
+                'requires_month': False,
+                'requires_year': True,
+                'requires_quantity': False,
+                'is_active': False,  # Por defecto inactivo, se activa en temporadas específicas
+            },
+            {
+                'code': '101',
+                'name': 'Inscripción al Cuatrimestre',
+                'description': 'Pago de inscripción al cuatrimestre (requerido para asignar cursos)',
+                'amount': None,  # Se configura por carrera en PaymentConfiguration
+                'requires_career': False,
+                'requires_semester': False,
+                'requires_month': False,
+                'requires_year': True,
+                'requires_quantity': False,
+            },
+            {
                 'code': '011',
                 'name': 'Inscripción extraordinaria',
                 'description': 'Inscripción extraordinaria para el ciclo académico',
@@ -46,6 +69,28 @@ class Command(BaseCommand):
                 'name': 'Colegiatura de Cursos',
                 'description': 'Pago mensual base de colegiatura por cursos',
                 'amount': None,  # Se configura por carrera en PaymentConfiguration
+                'requires_career': False,
+                'requires_semester': False,
+                'requires_month': True,
+                'requires_year': True,
+                'requires_quantity': False,
+            },
+            {
+                'code': '103',
+                'name': 'Colegiatura de Cursos con Media Beca',
+                'description': 'Pago mensual de colegiatura por cursos con descuento de media beca aplicado',
+                'amount': None,  # Se configura por carrera en PaymentConfiguration, ya incluye el descuento
+                'requires_career': False,
+                'requires_semester': False,
+                'requires_month': True,
+                'requires_year': True,
+                'requires_quantity': False,
+            },
+            {
+                'code': '105',
+                'name': 'Colegiatura de Cursos con Beca Completa',
+                'description': 'Pago de colegiatura por cursos con beca completa (valor 0, cuatrimestre completo pagado)',
+                'amount': Decimal('0.00'),  # Siempre es 0 para beca completa
                 'requires_career': False,
                 'requires_semester': False,
                 'requires_month': True,
@@ -190,6 +235,8 @@ class Command(BaseCommand):
         updated_count = 0
 
         for pt_data in payment_types:
+            # is_active puede estar especificado en pt_data, si no, usar True por defecto
+            is_active = pt_data.get('is_active', True)
             payment_type, created = PaymentType.objects.update_or_create(
                 code=pt_data['code'],
                 defaults={
@@ -201,7 +248,7 @@ class Command(BaseCommand):
                     'requires_month': pt_data['requires_month'],
                     'requires_year': pt_data['requires_year'],
                     'requires_quantity': pt_data['requires_quantity'],
-                    'is_active': True,
+                    'is_active': is_active,
                 }
             )
             if created:

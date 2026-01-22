@@ -48,7 +48,6 @@ INSTALLED_APPS = [
     'payments',
     'documents',
     'certificates',
-    'reports',
     'audit',  # Sistema de auditoría
 ]
 
@@ -349,6 +348,28 @@ JAZZMIN_UI_TWEAKS = {
         "success": "btn-success"
     }
 }
+
+# Email Configuration
+# Para desarrollo: usar console backend (los emails se muestran en la consola)
+# Para producción: configurar las variables de entorno con tus credenciales SMTP
+EMAIL_BACKEND = config(
+    'EMAIL_BACKEND',
+    default='django.core.mail.backends.console.EmailBackend' if DEBUG else 'django.core.mail.backends.smtp.EmailBackend'
+)
+
+# Configuración SMTP
+EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
+EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
+EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
+EMAIL_USE_SSL = config('EMAIL_USE_SSL', default=False, cast=bool)
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default=EMAIL_HOST_USER or 'noreply@admincusc.local')
+SERVER_EMAIL = DEFAULT_FROM_EMAIL  # Email para errores del servidor
+
+# Timeout para conexiones SMTP (en segundos)
+EMAIL_TIMEOUT = config('EMAIL_TIMEOUT', default=10, cast=int)
+
 
 # Stripe Configuration
 STRIPE_SECRET_KEY = config('STRIPE_SECRET_KEY', default='')

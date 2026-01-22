@@ -25,6 +25,9 @@ from .filters import StudentFilter
 from academics.models import Career
 from .utils import generate_carnet_number, generate_contract
 from users.permissions import HasPermission
+from payments.models import Scholarship
+from decimal import Decimal
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +35,7 @@ logger = logging.getLogger(__name__)
 class StudentViewSet(viewsets.ModelViewSet):
     queryset = Student.objects.all()
     serializer_class = StudentSerializer
-    permission_classes = [permissions.IsAuthenticated, HasPermission('manage_students')]
+    permission_classes = [permissions.IsAuthenticated]
     filterset_class = StudentFilter
     search_fields = ['carnet', 'first_name', 'first_last_name', 'second_last_name', 'email', 'career__name']
     ordering_fields = ['enrollment_date', 'first_name', 'first_last_name', 'carnet']
@@ -86,19 +89,10 @@ class StudentViewSet(viewsets.ModelViewSet):
                 # Los campos CCT y RVOE se completan automáticamente en el save() del modelo
             )
             
-            # Generar contrato PDF automáticamente
-            try:
-                pdf_file = generate_contract(student, enrollment)
-                filename = f"contrato_{student.carnet}_{year}.pdf"
-                enrollment.contract_file.save(filename, pdf_file, save=False)
-                enrollment.contract_generated = True
-                enrollment.save()
-            except Exception as e:
-                # Si falla la generación del contrato, registrar el error pero no fallar la creación del estudiante
-                logger.error(f'Error al generar contrato para estudiante {student.id}: {str(e)}', exc_info=True)
-                # Marcar el enrollment como creado pero sin contrato generado
-                enrollment.contract_generated = False
-                enrollment.save()
+            # NO generar contrato automáticamente - ahora requiere que el estudiante tenga cursos asignados
+            # El contrato se generará manualmente cuando el estudiante tenga cursos asignados
+            enrollment.contract_generated = False
+            enrollment.save()
             
             # Crear documentos requeridos automáticamente para el estudiante
             try:
@@ -128,6 +122,57 @@ class StudentViewSet(viewsets.ModelViewSet):
             except Exception as e:
                 logger.error(f'Error al crear documentos requeridos para estudiante {student.id}: {str(e)}', exc_info=True)
                 # Continuar sin fallar la creación del estudiante
+            
+            # Crear beca automáticamente si el estudiante tiene scholarship_type diferente de NINGUNA
+            try:
+                scholarship_type = student.scholarship_type
+                if scholarship_type and scholarship_type != 'NINGUNA':
+                    # Verificar si ya existe una beca para este estudiante
+                    existing_scholarship = getattr(student, 'scholarship', None)
+                    
+                    if existing_scholarship:
+                        # Si ya existe una beca, actualizarla si es necesario
+                        if existing_scholarship.scholarship_type != scholarship_type:
+                            # Determinar el porcentaje según el tipo de beca
+                            if scholarship_type == 'COMPLETA':
+                                percentage = Decimal('100.00')
+                            elif scholarship_type == 'MEDIA':
+                                percentage = Decimal('50.00')
+                            else:
+                                percentage = Decimal('0.00')
+                            
+                            existing_scholarship.scholarship_type = scholarship_type
+                            existing_scholarship.percentage = percentage
+                            # Si la beca estaba finalizada o suspendida, reactivarla
+                            if existing_scholarship.status in ['FINALIZADA', 'SUSPENDIDA']:
+                                existing_scholarship.status = 'ACTIVA'
+                                existing_scholarship.end_date = None
+                            existing_scholarship.save()
+                            logger.info(f'Beca actualizada para estudiante {student.id}: {scholarship_type}')
+                    else:
+                        # No existe beca, crear una nueva
+                        # Determinar el porcentaje según el tipo de beca
+                        if scholarship_type == 'COMPLETA':
+                            percentage = Decimal('100.00')
+                        elif scholarship_type == 'MEDIA':
+                            percentage = Decimal('50.00')
+                        else:
+                            percentage = Decimal('0.00')
+                        
+                        # Crear la beca
+                        Scholarship.objects.create(
+                            student=student,
+                            scholarship_type=scholarship_type,
+                            start_date=timezone.now().date(),
+                            end_date=None,  # Sin fecha de fin por defecto
+                            status='ACTIVA',
+                            percentage=percentage,
+                            notes=f'Beca creada automáticamente al inscribir al estudiante'
+                        )
+                        logger.info(f'Beca {scholarship_type} creada automáticamente para estudiante {student.id}')
+            except Exception as e:
+                logger.error(f'Error al crear beca para estudiante {student.id}: {str(e)}', exc_info=True)
+                # Continuar sin fallar la creación del estudiante
         
         # Retornar datos del estudiante con información de la inscripción
         student_data = StudentSerializer(student).data
@@ -135,6 +180,68 @@ class StudentViewSet(viewsets.ModelViewSet):
         student_data['enrollment'] = enrollment_data
         
         return Response(student_data, status=status.HTTP_201_CREATED)
+    
+    def perform_update(self, serializer):
+        """Actualizar estudiante y manejar creación/actualización de beca"""
+        # Guardar el estado anterior del scholarship_type antes de actualizar
+        instance = self.get_object()
+        old_scholarship_type = instance.scholarship_type
+        
+        # Actualizar el estudiante
+        student = serializer.save()
+        
+        # Manejar la beca si cambió el scholarship_type
+        new_scholarship_type = student.scholarship_type
+        
+        if new_scholarship_type != old_scholarship_type:
+            try:
+                if new_scholarship_type and new_scholarship_type != 'NINGUNA':
+                    # Determinar el porcentaje según el tipo de beca
+                    if new_scholarship_type == 'COMPLETA':
+                        percentage = Decimal('100.00')
+                    elif new_scholarship_type == 'MEDIA':
+                        percentage = Decimal('50.00')
+                    else:
+                        percentage = Decimal('0.00')
+                    
+                    # Verificar si ya existe una beca para este estudiante
+                    existing_scholarship = getattr(student, 'scholarship', None)
+                    
+                    if existing_scholarship:
+                        # Actualizar la beca existente
+                        existing_scholarship.scholarship_type = new_scholarship_type
+                        existing_scholarship.percentage = percentage
+                        # Si la beca estaba finalizada o suspendida, reactivarla
+                        if existing_scholarship.status in ['FINALIZADA', 'SUSPENDIDA']:
+                            existing_scholarship.status = 'ACTIVA'
+                            existing_scholarship.end_date = None  # Quitar fecha de fin si se reactiva
+                        existing_scholarship.save()
+                        logger.info(f'Beca actualizada para estudiante {student.id}: {old_scholarship_type} -> {new_scholarship_type}')
+                    else:
+                        # No existe beca, crear una nueva
+                        Scholarship.objects.create(
+                            student=student,
+                            scholarship_type=new_scholarship_type,
+                            start_date=timezone.now().date(),
+                            end_date=None,
+                            status='ACTIVA',
+                            percentage=percentage,
+                            notes=f'Beca creada automáticamente al actualizar el tipo de beca del estudiante'
+                        )
+                        logger.info(f'Beca {new_scholarship_type} creada automáticamente para estudiante {student.id}')
+                elif new_scholarship_type == 'NINGUNA' and old_scholarship_type != 'NINGUNA':
+                    # Si se cambió a NINGUNA, finalizar la beca existente
+                    existing_scholarship = getattr(student, 'scholarship', None)
+                    if existing_scholarship:
+                        existing_scholarship.status = 'FINALIZADA'
+                        existing_scholarship.end_date = timezone.now().date()
+                        existing_scholarship.save()
+                        logger.info(f'Beca finalizada para estudiante {student.id} (cambió a NINGUNA)')
+            except Exception as e:
+                logger.error(f'Error al actualizar beca para estudiante {student.id}: {str(e)}', exc_info=True)
+                # Continuar sin fallar la actualización del estudiante
+        
+        return student
     
     @action(detail=True, methods=['get'])
     def progress(self, request, pk=None):
@@ -266,6 +373,15 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             if not enrollment.student:
                 return Response(
                     {'error': 'No se encontró el estudiante asociado a esta inscripción'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Validar que el estudiante tenga cursos asignados antes de generar el contrato
+            from academics.models import CourseEnrollment
+            course_enrollments = CourseEnrollment.objects.filter(student=enrollment.student)
+            if not course_enrollments.exists():
+                return Response(
+                    {'error': 'No se puede generar el contrato: el estudiante no tiene cursos asignados. Por favor, asigne cursos al estudiante antes de generar el contrato.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             

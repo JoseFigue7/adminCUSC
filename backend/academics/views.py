@@ -118,15 +118,59 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
         return queryset
     
     def perform_create(self, serializer):
-        """Capturar usuario que crea la inscripción"""
+        """Capturar usuario que crea la inscripción y validar pago 100 o 101"""
         user = self.request.user if self.request.user.is_authenticated else None
         validated_data = serializer.validated_data
+        student = validated_data.get('student')
+        
+        # Validar que el estudiante tenga un pago 100 o 101 aprobado
+        # Esto aplica tanto para primera inscripción como para siguientes
+        # Obtener los tipos de pago 100 y 101
+        payment_type_100 = PaymentType.objects.filter(code='100', is_active=True).first()
+        payment_type_101 = PaymentType.objects.filter(code='101', is_active=True).first()
+        
+        if not payment_type_100 and not payment_type_101:
+            raise serializers.ValidationError(
+                'Los tipos de pago 100 o 101 (Inscripción al Cuatrimestre) no están configurados. '
+                'Contacte al administrador.'
+            )
+        
+        # Verificar si hay un pago 100 o 101 aprobado para este estudiante
+        # El pago debe estar aprobado y NO debe estar vinculado a otro cuatrimestre enrollment
+        # (cada cuatrimestre requiere su propio pago)
+        approved_payment = None
+        payment_types_to_check = []
+        if payment_type_100:
+            payment_types_to_check.append(payment_type_100)
+        if payment_type_101:
+            payment_types_to_check.append(payment_type_101)
+        
+        approved_payment = Payment.objects.filter(
+            student=student,
+            payment_type__in=payment_types_to_check,
+            status='APROBADO',
+            cuatrimestre_enrollment__isnull=True  # Pago no vinculado a ningún cuatrimestre aún
+        ).first()
+        
+        if not approved_payment:
+            available_codes = []
+            if payment_type_100:
+                available_codes.append('100 (Gratis)')
+            if payment_type_101:
+                available_codes.append('101')
+            raise serializers.ValidationError(
+                f'El estudiante debe tener un pago de inscripción ({", ".join(available_codes)}) aprobado '
+                'antes de crear una nueva inscripción. Realice el pago primero.'
+            )
         
         # Estado por defecto: PRE_INSCRIPCION para el flujo presencial guiado
         status = validated_data.get('status', 'PRE_INSCRIPCION')
         
-        # Aplicar regla: si is_first_enrollment == True, entonces is_enrollment_fee_exempt = True
-        if validated_data.get('is_first_enrollment', False):
+        # Si el pago es 100 (gratis), marcar como exonerado
+        if approved_payment.payment_type.code == '100':
+            validated_data['is_enrollment_fee_exempt'] = True
+        # Si es primera inscripción y el pago es 101, también marcar como exonerado (compatibilidad)
+        elif validated_data.get('is_first_enrollment', False):
             validated_data['is_enrollment_fee_exempt'] = True
         
         # Si el estado es EN_CURSO, usar el manager para validación thread-safe
@@ -136,6 +180,11 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
             )
         else:
             instance = serializer.save()
+        
+        # Vincular el pago aprobado (100 o 101) a este cuatrimestre enrollment
+        if approved_payment:
+            approved_payment.cuatrimestre_enrollment = instance
+            approved_payment.save()
         
         instance._changed_by_user = user
         instance._status_change_notes = 'Inscripción al cuatrimestre creada'
@@ -385,6 +434,68 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
             'status_display': cuatrimestre_enrollment.get_status_display()
         })
     
+    @action(detail=False, methods=['get'])
+    def can_create_enrollment(self, request):
+        """
+        Verificar si un estudiante puede crear una nueva inscripción.
+        Retorna True si tiene un pago 100 o 101 aprobado sin vincular a ningún cuatrimestre.
+        """
+        student_id = request.query_params.get('student_id')
+        if not student_id:
+            return Response(
+                {'error': 'student_id es requerido'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            student = Student.objects.get(id=student_id)
+        except Student.DoesNotExist:
+            return Response(
+                {'error': 'Estudiante no encontrado'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Obtener los tipos de pago 100 y 101
+        payment_type_100 = PaymentType.objects.filter(code='100', is_active=True).first()
+        payment_type_101 = PaymentType.objects.filter(code='101', is_active=True).first()
+        
+        if not payment_type_100 and not payment_type_101:
+            return Response({
+                'can_create': False,
+                'reason': 'Los tipos de pago 100 o 101 no están configurados',
+                'has_approved_payment': False
+            })
+        
+        # Verificar si hay un pago 100 o 101 aprobado sin vincular a ningún cuatrimestre
+        payment_types_to_check = []
+        if payment_type_100:
+            payment_types_to_check.append(payment_type_100)
+        if payment_type_101:
+            payment_types_to_check.append(payment_type_101)
+        
+        approved_payment = Payment.objects.filter(
+            student=student,
+            payment_type__in=payment_types_to_check,
+            status='APROBADO',
+            cuatrimestre_enrollment__isnull=True
+        ).first()
+        
+        available_codes = []
+        if payment_type_100:
+            available_codes.append('100 (Gratis)')
+        if payment_type_101:
+            available_codes.append('101')
+        
+        return Response({
+            'can_create': approved_payment is not None,
+            'has_approved_payment': approved_payment is not None,
+            'payment_id': str(approved_payment.id) if approved_payment else None,
+            'payment_code': approved_payment.payment_type.code if approved_payment else None,
+            'available_payment_codes': available_codes,
+            'message': 'Puede crear una nueva inscripción' if approved_payment else 
+                      f'Debe realizar y aprobar el pago de inscripción ({", ".join(available_codes)}) antes de crear una nueva inscripción'
+        })
+    
     @action(detail=True, methods=['get'])
     def courses(self, request, pk=None):
         """Obtener cursos inscritos en este cuatrimestre"""
@@ -476,28 +587,49 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Obtener o crear tipo de pago de inscripción (código 010)
+        # Obtener o crear tipo de pago de inscripción (código 101)
+        # El pago 100 solo se puede crear desde el formulario de pagos, no desde aquí
         payment_type, _ = PaymentType.objects.get_or_create(
-            code='010',
+            code='101',
             defaults={
                 'name': 'Inscripción al Cuatrimestre',
-                'description': 'Pago de inscripción al cuatrimestre',
+                'description': 'Pago de inscripción al cuatrimestre (requerido para asignar cursos)',
                 'is_active': True
             }
         )
         
-        # Crear el pago
-        payment = Payment.objects.create(
+        # Verificar si ya existe un pago 100 o 101 aprobado para este estudiante sin cuatrimestre enrollment
+        # Si existe, vincularlo a este cuatrimestre enrollment
+        payment_type_100 = PaymentType.objects.filter(code='100', is_active=True).first()
+        payment_types_to_check = [payment_type]
+        if payment_type_100:
+            payment_types_to_check.append(payment_type_100)
+        
+        existing_payment = Payment.objects.filter(
             student=cuatrimestre_enrollment.student,
-            payment_type=payment_type,
-            payment_method=payment_method,
-            original_amount=enrollment_fee,
-            payment_reference=payment_reference,
-            transfer_receipt=transfer_receipt,
-            status='PENDIENTE',
-            cuatrimestre_enrollment=cuatrimestre_enrollment,
-            year=cuatrimestre_enrollment.academic_year
-        )
+            payment_type__in=payment_types_to_check,
+            status='APROBADO',
+            cuatrimestre_enrollment__isnull=True
+        ).first()
+        
+        if existing_payment:
+            # Vincular el pago existente a este cuatrimestre enrollment
+            existing_payment.cuatrimestre_enrollment = cuatrimestre_enrollment
+            existing_payment.save()
+            payment = existing_payment
+        else:
+            # Crear el pago nuevo (solo 101, el 100 se crea desde el formulario de pagos)
+            payment = Payment.objects.create(
+                student=cuatrimestre_enrollment.student,
+                payment_type=payment_type,
+                payment_method=payment_method,
+                original_amount=enrollment_fee,
+                payment_reference=payment_reference,
+                transfer_receipt=transfer_receipt,
+                status='PENDIENTE',
+                cuatrimestre_enrollment=cuatrimestre_enrollment,
+                year=cuatrimestre_enrollment.academic_year
+            )
         
         return Response({
             'payment_id': str(payment.id),
@@ -831,11 +963,13 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
         """Generar hoja de asignación con información del estudiante, cursos, horarios y colegiatura"""
         cuatrimestre_enrollment = self.get_object()
         
-        # Validar que tenga cursos asignados
+        # Validar que tenga cursos asignados o pre-asignados
         courses_count = cuatrimestre_enrollment.course_enrollments.count()
-        if courses_count == 0:
+        pre_assigned_ids = cuatrimestre_enrollment.pre_assign_course_ids or []
+        
+        if courses_count == 0 and len(pre_assigned_ids) == 0:
             return Response(
-                {'error': 'No hay cursos asignados.'},
+                {'error': 'No hay cursos asignados o pre-asignados.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -1118,18 +1252,20 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
         # Refrescar desde la BD para asegurar que tenemos los datos más recientes
         cuatrimestre_enrollment.refresh_from_db()
         
-        # Validar que tenga pagos generados (solo pagos de colegiatura, código 201)
+        # Validar que tenga pagos generados (pagos de colegiatura: códigos 102, 103 o 105)
         from payments.models import Payment, PaymentType
         import logging
         
         logger = logging.getLogger(__name__)
         
-        try:
-            tuition_payment_type = PaymentType.objects.get(code='102')
-        except PaymentType.DoesNotExist:
-            logger.error(f'PaymentType con código 102 no encontrado para cuatrimestre_enrollment {cuatrimestre_enrollment.id}')
+        # Buscar todos los tipos de pago de colegiatura (102: sin beca, 103: media beca, 105: beca completa)
+        tuition_payment_codes = ['102', '103', '105']
+        tuition_payment_types = PaymentType.objects.filter(code__in=tuition_payment_codes, is_active=True)
+        
+        if not tuition_payment_types.exists():
+            logger.error(f'No se encontraron tipos de pago de colegiatura (códigos 102, 103, 105) para cuatrimestre_enrollment {cuatrimestre_enrollment.id}')
             return Response(
-                {'error': 'No se encontró el tipo de pago de colegiatura (código 102). Contacte al administrador.'},
+                {'error': 'No se encontraron tipos de pago de colegiatura. Contacte al administrador.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -1139,13 +1275,14 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
         for p in all_payments:
             logger.info(f'  - Pago {p.id}: tipo={p.payment_type.code if p.payment_type else None}, monto={p.original_amount}')
         
+        # Buscar pagos de colegiatura (cualquiera de los códigos: 102, 103, 105)
         payments = Payment.objects.filter(
             cuatrimestre_enrollment=cuatrimestre_enrollment,
-            payment_type=tuition_payment_type
+            payment_type__in=tuition_payment_types
         )
         
         payments_count = payments.count()
-        logger.info(f'Pagos de colegiatura (código 201) para cuatrimestre_enrollment {cuatrimestre_enrollment.id}: {payments_count}')
+        logger.info(f'Pagos de colegiatura (códigos 102, 103, 105) para cuatrimestre_enrollment {cuatrimestre_enrollment.id}: {payments_count}')
         
         if payments_count == 0:
             # Si está exonerado, no debería haber pagos de colegiatura

@@ -9,42 +9,19 @@ import string
 
 # ==================== VALIDADORES PERSONALIZADOS ====================
 
-def validate_mexican_phone(value):
+def validate_phone(value):
     """
-    Valida que el número telefónico sea mexicano válido.
-    El formato debe ser: +52 seguido de exactamente 10 dígitos (solo números).
-    Ejemplo: +525512345678
+    Valida que el número telefónico solo contenga el signo + y números.
+    Ejemplo: +1234567890, +525512345678, 1234567890
     """
     if not value:
         raise ValidationError('El número de teléfono es requerido.')
     
     phone = str(value).strip()
     
-    # Debe empezar con +52
-    if not phone.startswith('+52'):
-        raise ValidationError('El número telefónico debe comenzar con +52 (código de país de México).')
-    
-    # Obtener solo los dígitos después de +52
-    digits_after_country = phone[3:]  # Remover +52
-    
-    # Eliminar espacios, guiones y paréntesis si los hay
-    digits_after_country = re.sub(r'[\s\-\(\)]', '', digits_after_country)
-    
-    # Debe contener exactamente 10 dígitos
-    if len(digits_after_country) != 10:
-        raise ValidationError(
-            'El número telefónico debe tener exactamente 10 dígitos después de +52. '
-            f'Se encontraron {len(digits_after_country)} dígitos.'
-        )
-    
-    # Debe contener solo números
-    if not digits_after_country.isdigit():
-        raise ValidationError('El número telefónico solo debe contener números después de +52.')
-    
-    # Validar que el código de área (LADA) sea válido (primer dígito debe ser 2-9)
-    lada_first_digit = int(digits_after_country[0])
-    if lada_first_digit < 2 or lada_first_digit > 9:
-        raise ValidationError('El código de área (LADA) no es válido para México. El primer dígito debe ser entre 2 y 9.')
+    # Validar que solo contenga + y números (el + puede estar en cualquier posición)
+    if not re.match(r'^[+0-9]+$', phone):
+        raise ValidationError('El número telefónico solo puede contener el signo + y números.')
     
     return value
 
@@ -327,10 +304,10 @@ class Student(models.Model):
     # Información de contacto (no requerida por SEP pero necesaria para el sistema)
     email = models.EmailField(unique=True, blank=False, null=False, verbose_name='Correo electrónico')
     phone = models.CharField(
-        max_length=13,
-        validators=[validate_mexican_phone],
+        max_length=20,
+        validators=[validate_phone],
         verbose_name='Teléfono',
-        help_text='Número telefónico mexicano: debe comenzar con +52 seguido de 10 dígitos. Ejemplo: +525512345678'
+        help_text='Número telefónico: solo se permite el signo + y números. Ejemplo: +1234567890'
     )
     address = models.TextField(verbose_name='Dirección')
     

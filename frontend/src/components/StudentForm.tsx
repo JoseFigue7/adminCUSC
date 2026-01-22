@@ -28,7 +28,7 @@ const StudentForm: React.FC = () => {
     first_last_name: '',
     second_last_name: '',
     email: '',
-    phone: '+52',
+    phone: '',
     date_of_birth: '',
     gender: 'H',
     curp: '',
@@ -169,7 +169,7 @@ const StudentForm: React.FC = () => {
         first_last_name: data.first_last_name || data.last_name || '',
         second_last_name: data.second_last_name || '',
         email: data.email || '',
-        phone: data.phone && data.phone.startsWith('+52') ? data.phone : '+52' + (data.phone ? data.phone.replace('+52', '').replace(/\D/g, '').slice(0, 10) : ''),
+        phone: data.phone || '',
         date_of_birth: data.date_of_birth || '',
         gender: data.gender || 'H',
         curp: data.curp || '',
@@ -222,19 +222,14 @@ const StudentForm: React.FC = () => {
       newErrors.email = 'El email no es válido';
     }
     
-    // Validar teléfono: debe tener +52 + 10 dígitos
-    const phoneDigits = student.phone.replace('+52', '').trim();
-    if (!phoneDigits) {
-      newErrors.phone = 'El teléfono es requerido. Ingrese 10 dígitos después de +52';
-    } else if (phoneDigits.length !== 10) {
-      newErrors.phone = `Debe ingresar exactamente 10 dígitos. Se encontraron ${phoneDigits.length} dígitos.`;
-    } else if (!/^\d+$/.test(phoneDigits)) {
-      newErrors.phone = 'Solo se permiten números';
+    // Validar teléfono: solo permite + y números
+    if (!student.phone.trim()) {
+      newErrors.phone = 'El teléfono es requerido';
     } else {
-      // Validar que el código de área (LADA) sea válido
-      const lada = phoneDigits.substring(0, 2);
-      if (parseInt(lada[0]) < 2) {
-        newErrors.phone = 'El código de área (LADA) no es válido. Debe comenzar con 2-9';
+      // Validar que solo contenga + y números (el + puede estar en cualquier posición)
+      const phonePattern = /^[+0-9]+$/;
+      if (!phonePattern.test(student.phone.trim())) {
+        newErrors.phone = 'El teléfono solo puede contener el signo + y números';
       }
     }
     
@@ -275,6 +270,15 @@ const StudentForm: React.FC = () => {
     }
 
     setErrors(newErrors);
+    
+    // Mostrar errores con Toast si hay alguno
+    if (Object.keys(newErrors).length > 0) {
+      const errorMessages = Object.values(newErrors);
+      if (errorMessages.length > 0) {
+        error(errorMessages.join(' | '));
+      }
+    }
+    
     return Object.keys(newErrors).length === 0;
   };
 
@@ -327,13 +331,8 @@ const StudentForm: React.FC = () => {
         const response = await createStudent(submitData);
         const createdStudent = response.data;
         
-        // Verificar si el contrato fue generado
-        const contractGenerated = createdStudent.enrollment?.contract_generated || false;
-        const contractMessage = contractGenerated 
-          ? 'Estudiante creado exitosamente. Contrato generado automáticamente.' 
-          : 'Estudiante creado exitosamente.';
-        
-        success(contractMessage);
+        // El contrato ahora solo se genera cuando el estudiante tiene cursos asignados
+        success('Estudiante creado exitosamente. Asigne cursos al estudiante para poder generar el contrato.');
         
         // Navegar al detalle del estudiante para ver el contrato
         if (createdStudent.id) {
@@ -647,39 +646,20 @@ const StudentForm: React.FC = () => {
               
               <div className="form-group">
                 <label>Teléfono *</label>
-                <div style={{ display: 'flex', alignItems: 'center' }}>
-                  <span style={{ 
-                    padding: '0.875rem 1rem', 
-                    border: `2px solid ${errors.phone ? 'var(--danger-color)' : 'var(--gray-300)'}`, 
-                    borderRight: 'none',
-                    borderTopLeftRadius: 'var(--radius-md)',
-                    borderBottomLeftRadius: 'var(--radius-md)',
-                    background: 'var(--gray-100)',
-                    color: 'var(--gray-700)',
-                    fontWeight: 600,
-                    userSelect: 'none'
-                  }}>+52</span>
-                  <input
-                    type="tel"
-                    value={student.phone.startsWith('+52') ? student.phone.replace('+52', '') : student.phone.replace(/\D/g, '').slice(0, 10)}
-                    onChange={(e) => {
-                      // Solo permitir números, máximo 10 dígitos
-                      const value = e.target.value.replace(/\D/g, '').slice(0, 10);
-                      setStudent({ ...student, phone: '+52' + value });
-                    }}
-                    className={errors.phone ? 'error' : ''}
-                    placeholder="5512345678"
-                    maxLength={10}
-                    required
-                    style={{
-                      borderTopLeftRadius: 0,
-                      borderBottomLeftRadius: 0,
-                      flex: 1
-                    }}
-                  />
-                </div>
+                <input
+                  type="tel"
+                  value={student.phone}
+                  onChange={(e) => {
+                    // Solo permitir + y números
+                    const value = e.target.value.replace(/[^+0-9]/g, '');
+                    setStudent({ ...student, phone: value });
+                  }}
+                  className={errors.phone ? 'error' : ''}
+                  placeholder="+1234567890"
+                  required
+                />
                 <small style={{ display: 'block', marginTop: '0.25rem', color: '#666', fontSize: '0.8125rem' }}>
-                  Ingrese 10 dígitos (ejemplo: 5512345678)
+                  Solo se permite el signo + y números
                 </small>
                 {errors.phone && <span className="error-message">{errors.phone}</span>}
               </div>
