@@ -22,7 +22,7 @@ class Migration(migrations.Migration):
                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
                 ('username', models.CharField(blank=True, help_text='Nombre de usuario al momento de la acción', max_length=150, null=True, verbose_name='Nombre de usuario')),
                 ('action', models.CharField(choices=[('CREATE', 'Crear'), ('UPDATE', 'Actualizar'), ('DELETE', 'Eliminar'), ('APPROVE', 'Aprobar'), ('REJECT', 'Rechazar'), ('VIEW', 'Consultar'), ('EXPORT', 'Exportar')], help_text='Tipo de acción realizada', max_length=20, verbose_name='Acción')),
-                ('object_id', models.TextField(help_text='ID del registro afectado', verbose_name='ID del objeto')),
+                ('object_id', models.CharField(help_text='ID del registro afectado', max_length=255, verbose_name='ID del objeto')),
                 ('model_name', models.CharField(help_text='Nombre del modelo afectado (app_label.ModelName)', max_length=255, verbose_name='Nombre del modelo')),
                 ('data_snapshot', models.JSONField(blank=True, default=dict, help_text='Datos del registro al momento de la acción (JSON)', verbose_name='Snapshot de datos')),
                 ('previous_data', models.JSONField(blank=True, default=dict, help_text='Datos anteriores del registro (para acciones UPDATE)', verbose_name='Datos anteriores')),

@@ -67,8 +67,9 @@ class AuditLog(models.Model):
         help_text='Modelo afectado'
     )
     
-    # ID del registro afectado
-    object_id = models.TextField(
+    # ID del registro afectado (CharField para compatibilidad con índices en MySQL)
+    object_id = models.CharField(
+        max_length=255,
         verbose_name='ID del objeto',
         help_text='ID del registro afectado'
     )
