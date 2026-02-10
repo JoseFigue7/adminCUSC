@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getStudents, createPayment, updatePayment, uploadPaymentReceipt, getPaymentTypes, findOldestUnpaidPayment, paymentsApi } from '../services/api';
 import { FiDollarSign, FiSave, FiX, FiLoader, FiUpload, FiSearch, FiAlertCircle } from '../utils/icons';
@@ -72,10 +72,35 @@ const PaymentForm: React.FC = () => {
     { value: 12, label: 'Diciembre' },
   ];
 
+  const loadStudents = useCallback(async () => {
+    setLoadingData(true);
+    try {
+      const response = await getStudents({ page_size: 1000, is_active: true });
+      const data = response.data.results || response.data;
+      setStudents(data);
+    } catch (err) {
+      console.error('Error loading students:', err);
+      error('Error al cargar estudiantes');
+    } finally {
+      setLoadingData(false);
+    }
+  }, [error]);
+
+  const loadPaymentTypes = useCallback(async () => {
+    try {
+      const response = await getPaymentTypes();
+      const data = response.data.results || response.data;
+      setPaymentTypes(data);
+    } catch (err) {
+      console.error('Error loading payment types:', err);
+      error('Error al cargar tipos de pago');
+    }
+  }, [error]);
+
   useEffect(() => {
     loadStudents();
     loadPaymentTypes();
-  }, []);
+  }, [loadStudents, loadPaymentTypes]);
 
   useEffect(() => {
     // Filtrar estudiantes según búsqueda
@@ -103,7 +128,7 @@ const PaymentForm: React.FC = () => {
         setStudentSearch(`${student.carnet} - ${student.first_name} ${student.last_name}`);
       }
     }
-  }, [payment.student, students]);
+  }, [payment.student, students, studentSearch]);
 
   useEffect(() => {
     // Cerrar dropdown al hacer click fuera
@@ -117,32 +142,7 @@ const PaymentForm: React.FC = () => {
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, []);
-
-  const loadStudents = async () => {
-    setLoadingData(true);
-    try {
-      const response = await getStudents({ page_size: 1000, is_active: true });
-      const data = response.data.results || response.data;
-      setStudents(data);
-    } catch (err) {
-      console.error('Error loading students:', err);
-      error('Error al cargar estudiantes');
-    } finally {
-      setLoadingData(false);
-    }
-  };
-
-  const loadPaymentTypes = async () => {
-    try {
-      const response = await getPaymentTypes();
-      const data = response.data.results || response.data;
-      setPaymentTypes(data);
-    } catch (err) {
-      console.error('Error loading payment types:', err);
-      error('Error al cargar tipos de pago');
-    }
-  };
+  }, [studentSearch]);
 
   const handleStudentSelect = async (student: Student) => {
     setPayment({ ...payment, student: student.id });

@@ -4,6 +4,7 @@ import './index.css';
 import App from './App';
 import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
+import { ToastProvider } from './context/ToastContext';
 
 // Initialize theme on load
 const savedTheme = localStorage.getItem('theme') || 'light';
@@ -16,7 +17,9 @@ root.render(
   <React.StrictMode>
     <ThemeProvider>
       <AuthProvider>
-        <App />
+        <ToastProvider>
+          <App />
+        </ToastProvider>
       </AuthProvider>
     </ThemeProvider>
   </React.StrictMode>

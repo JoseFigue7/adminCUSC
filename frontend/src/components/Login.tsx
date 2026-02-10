@@ -2,14 +2,14 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { FiLogIn, FiUser, FiLock, FiLoader } from '../utils/icons';
-import { useToast } from '../hooks/useToast';
+import { useToastContext } from '../context/ToastContext';
 import './shared.css';
 import './Login.css';
 
 const Login: React.FC = () => {
   const navigate = useNavigate();
   const { login } = useAuth();
-  const { success, error } = useToast();
+  const { success, error } = useToastContext();
   
   const [credentials, setCredentials] = useState({
     username: '',
@@ -38,13 +38,10 @@ const Login: React.FC = () => {
       navigate('/');
     } catch (err: any) {
       console.error('Login error:', err);
-      const errorMessage = err.response?.data?.detail || 
-                          err.response?.data?.error || 
-                          'Error al iniciar sesión. Verifica tus credenciales.';
-      error(errorMessage);
-      if (err.response?.data) {
-        setErrors(err.response.data);
-      }
+      // Mostrar mensaje de error específico para credenciales incorrectas
+      error('Usuario y/o contraseña incorrecto');
+      // Limpiar errores de campos específicos si los hay
+      setErrors({});
     } finally {
       setLoading(false);
     }

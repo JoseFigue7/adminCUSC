@@ -66,7 +66,6 @@ interface Enrollment {
 
 const StudentDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const { success, error } = useToast();
   const [student, setStudent] = useState<Student | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -74,15 +73,8 @@ const StudentDetail: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState<string | null>(null);
   const [uploadingContract, setUploadingContract] = useState(false);
-  const [selectedDocType, setSelectedDocType] = useState<string>('');
 
-  useEffect(() => {
-    if (id) {
-      loadData();
-    }
-  }, [id]);
-
-  const loadData = async () => {
+  const loadData = React.useCallback(async () => {
     if (!id) return;
     setLoading(true);
     try {
@@ -137,7 +129,13 @@ const StudentDetail: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
+
+  useEffect(() => {
+    if (id) {
+      loadData();
+    }
+  }, [id, loadData]);
 
   const handleFileUpload = async (documentType: string, file: File) => {
     if (!id) return;

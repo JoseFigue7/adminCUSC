@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { paymentsApi, approvePayment, rejectPayment, uploadPaymentReceipt, updatePaymentReference, getPendingPaymentsCount } from '../services/api';
+import { paymentsApi, approvePayment, rejectPayment, uploadPaymentReceipt, updatePaymentReference } from '../services/api';
 import { FiDollarSign, FiCheck, FiX, FiAlertCircle, FiDownload, FiUpload, FiEdit2, FiSave, FiArrowLeft } from '../utils/icons';
 import { useToast } from '../hooks/useToast';
 import Pagination from './Pagination';
@@ -85,7 +85,7 @@ const PendingTransfers: React.FC = () => {
 
   useEffect(() => {
     loadPayments(currentPage, searchQuery);
-  }, [currentPage, loadPayments]);
+  }, [currentPage, searchQuery, loadPayments]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -176,7 +176,7 @@ const PendingTransfers: React.FC = () => {
     if (!receiptUrl) return;
     const fullUrl = receiptUrl.startsWith('http') 
       ? receiptUrl 
-      : `${process.env.REACT_APP_API_URL || 'http://localhost:8004'}/${receiptUrl}`;
+      : `${process.env.REACT_APP_API_URL || 'http://localhost:8000'}/${receiptUrl}`;
     window.open(fullUrl, '_blank');
   };
 

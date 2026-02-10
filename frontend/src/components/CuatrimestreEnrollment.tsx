@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { 
   getStudent,
@@ -6,7 +6,7 @@ import {
 } from '../services/api';
 import { 
   FiCalendar, FiPlus, FiArrowLeft, FiCheckCircle, FiXCircle,
-  FiX, FiEdit, FiDollarSign, FiDownload, FiClock, FiAlertCircle
+  FiX, FiEdit, FiDollarSign
 } from '../utils/icons';
 import { useToast } from '../hooks/useToast';
 import './shared.css';
@@ -42,14 +42,6 @@ interface CuatrimestreEnrollment {
   career_name: string;
 }
 
-interface Course {
-  id: string;
-  code: string;
-  name: string;
-  credits: number;
-  cuatrimestre: string;
-}
-
 const CuatrimestreEnrollment: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -75,15 +67,8 @@ const CuatrimestreEnrollment: React.FC = () => {
     transfer_receipt: null as File | null
   });
   const [canCreateEnrollment, setCanCreateEnrollment] = useState(false);
-  const [checkingEnrollmentPermission, setCheckingEnrollmentPermission] = useState(false);
 
-  useEffect(() => {
-    if (studentId) {
-      loadData();
-    }
-  }, [studentId]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     if (!studentId) {
       setLoading(false);
       return;
@@ -118,7 +103,13 @@ const CuatrimestreEnrollment: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [studentId]);
+
+  useEffect(() => {
+    if (studentId) {
+      loadData();
+    }
+  }, [studentId, loadData]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

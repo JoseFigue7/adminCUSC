@@ -27,7 +27,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Toast from './components/Toast';
 import ThemeToggle from './components/ThemeToggle';
 import { useAuth } from './context/AuthContext';
-import { useToast } from './hooks/useToast';
+import { useToastContext } from './context/ToastContext';
 import './App.css';
 
 const Navigation: React.FC = () => {
@@ -138,7 +138,7 @@ const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 };
 
 function AppContent() {
-  const { toasts, removeToast } = useToast();
+  const { toasts, removeToast } = useToastContext();
   const { isAuthenticated } = useAuth();
   const location = useLocation();
   

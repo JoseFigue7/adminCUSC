@@ -1,8 +1,16 @@
 import React, { createContext, useContext, ReactNode } from 'react';
 import { useToast, ToastType } from '../hooks/useToast';
 
+interface Toast {
+  id: string;
+  message: string;
+  type: ToastType;
+}
+
 interface ToastContextType {
+  toasts: Toast[];
   showToast: (message: string, type?: ToastType) => string;
+  removeToast: (id: string) => void;
   success: (message: string) => string;
   error: (message: string) => string;
   warning: (message: string) => string;
