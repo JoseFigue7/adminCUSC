@@ -447,3 +447,309 @@ class ReportsViewSet(viewsets.ViewSet):
             'completa': completa,
             'media': media,
         }
+
+    @action(detail=False, methods=['get'], url_path='payments/detailed')
+    def payments_detailed(self, request):
+        """
+        Reporte detallado de todos los pagos recibidos
+        Incluye: fecha, estudiante, tipo de pago, monto, estado, método de pago
+        """
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+        
+        # Parsear fechas
+        if start_date:
+            try:
+                start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+            except ValueError:
+                start_date = None
+        else:
+            # Por defecto, último año
+            start_date = (datetime.now() - timedelta(days=365)).date()
+        
+        if end_date:
+            try:
+                end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+            except ValueError:
+                end_date = None
+        else:
+            end_date = timezone.now().date()
+        
+        # Obtener pagos con relaciones
+        payments_qs = Payment.objects.select_related(
+            'student', 
+            'payment_type',
+            'created_by',
+            'approved_by'
+        ).order_by('-payment_date', '-created_at')
+        
+        # Filtrar por rango de fechas
+        if start_date and end_date:
+            payments_qs = payments_qs.filter(
+                Q(payment_date__gte=start_date) & Q(payment_date__lte=end_date)
+            )
+        
+        # Construir lista de pagos detallados
+        payments_list = []
+        for payment in payments_qs:
+            payments_list.append({
+                'id': str(payment.id),
+                'fecha_pago': payment.payment_date.strftime('%Y-%m-%d') if payment.payment_date else None,
+                'fecha_creacion': payment.created_at.strftime('%Y-%m-%d %H:%M:%S') if payment.created_at else None,
+                'estudiante': {
+                    'id': str(payment.student.id),
+                    'carnet': payment.student.carnet or '',
+                    'nombre_completo': payment.student.get_full_name(),
+                    'email': payment.student.email or '',
+                },
+                'tipo_pago': {
+                    'codigo': payment.payment_type.code if payment.payment_type else '',
+                    'nombre': payment.payment_type.name if payment.payment_type else 'Sin tipo',
+                },
+                'monto': {
+                    'original': float(payment.original_amount or payment.amount or Decimal('0.00')),
+                    'descuento_beca': float(payment.scholarship_discount_amount or Decimal('0.00')),
+                    'mora': float(payment.penalty_amount or Decimal('0.00')),
+                    'final': float(payment.final_amount or payment.amount or Decimal('0.00')),
+                },
+                'estado': payment.status,
+                'estado_display': payment.get_status_display(),
+                'metodo_pago': payment.payment_method,
+                'metodo_pago_display': payment.get_payment_method_display(),
+                'referencia': payment.payment_reference or '',
+                'mes': payment.month,
+                'año': payment.year,
+                'creado_por': payment.created_by.get_full_name() if payment.created_by else None,
+                'aprobado_por': payment.approved_by.get_full_name() if payment.approved_by else None,
+                'fecha_aprobacion': payment.approved_at.strftime('%Y-%m-%d %H:%M:%S') if payment.approved_at else None,
+            })
+        
+        # Estadísticas resumidas
+        total_pagos = payments_qs.count()
+        total_aprobados = payments_qs.filter(status='APROBADO').count()
+        total_pendientes = payments_qs.filter(status__in=['PENDIENTE', 'EN_REVISION']).count()
+        total_rechazados = payments_qs.filter(status='RECHAZADO').count()
+        
+        monto_total_aprobados = payments_qs.filter(status='APROBADO').aggregate(
+            total=Sum('final_amount', output_field=DecimalField(max_digits=12, decimal_places=2))
+        )['total'] or Decimal('0.00')
+        
+        # Si final_amount es None, usar amount
+        if monto_total_aprobados == Decimal('0.00'):
+            monto_total_aprobados = payments_qs.filter(status='APROBADO').aggregate(
+                total=Sum('amount', output_field=DecimalField(max_digits=12, decimal_places=2))
+            )['total'] or Decimal('0.00')
+        
+        return Response({
+            'resumen': {
+                'total_pagos': total_pagos,
+                'aprobados': total_aprobados,
+                'pendientes': total_pendientes,
+                'rechazados': total_rechazados,
+                'monto_total_aprobados': float(monto_total_aprobados),
+                'rango_fechas': {
+                    'inicio': start_date.isoformat() if start_date else None,
+                    'fin': end_date.isoformat() if end_date else None,
+                }
+            },
+            'pagos': payments_list,
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='executive')
+    def executive_report(self, request):
+        """
+        Reporte ejecutivo para gerencia
+        Incluye estadísticas agrupadas por tipo de pago, métodos de pago, etc.
+        """
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+        
+        # Parsear fechas
+        if start_date:
+            try:
+                start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+            except ValueError:
+                start_date = None
+        else:
+            # Por defecto, año actual
+            start_date = datetime.now().replace(month=1, day=1).date()
+        
+        if end_date:
+            try:
+                end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+            except ValueError:
+                end_date = None
+        else:
+            end_date = timezone.now().date()
+        
+        # Obtener pagos aprobados (solo estos cuentan para estadísticas financieras)
+        payments_qs = Payment.objects.select_related(
+            'student', 
+            'payment_type'
+        ).filter(status='APROBADO')
+        
+        # Filtrar por rango de fechas
+        if start_date and end_date:
+            payments_qs = payments_qs.filter(
+                Q(payment_date__gte=start_date) & Q(payment_date__lte=end_date)
+            )
+        
+        # 1. Estadísticas generales
+        total_pagos = payments_qs.count()
+        monto_total = payments_qs.aggregate(
+            total=Sum('final_amount', output_field=DecimalField(max_digits=12, decimal_places=2))
+        )['total'] or Decimal('0.00')
+        
+        # Si final_amount es None, usar amount
+        if monto_total == Decimal('0.00'):
+            monto_total = payments_qs.aggregate(
+                total=Sum('amount', output_field=DecimalField(max_digits=12, decimal_places=2))
+            )['total'] or Decimal('0.00')
+        
+        promedio_pago = monto_total / total_pagos if total_pagos > 0 else Decimal('0.00')
+        
+        # 2. Pagos agrupados por tipo de pago
+        pagos_por_tipo = {}
+        pagos_por_tipo_data = payments_qs.values(
+            'payment_type__code',
+            'payment_type__name'
+        ).annotate(
+            cantidad=Count('id'),
+            monto_total=Sum('final_amount', output_field=DecimalField(max_digits=12, decimal_places=2))
+        ).order_by('-monto_total')
+        
+        # Si final_amount es None, usar amount
+        for item in pagos_por_tipo_data:
+            if item['monto_total'] is None or item['monto_total'] == Decimal('0.00'):
+                # Recalcular con amount
+                tipo_code = item['payment_type__code']
+                tipo_pagos = payments_qs.filter(payment_type__code=tipo_code)
+                monto_recalc = tipo_pagos.aggregate(
+                    total=Sum('amount', output_field=DecimalField(max_digits=12, decimal_places=2))
+                )['total'] or Decimal('0.00')
+                item['monto_total'] = monto_recalc
+        
+        for item in pagos_por_tipo_data:
+            tipo_key = item['payment_type__code'] or 'SIN_TIPO'
+            pagos_por_tipo[tipo_key] = {
+                'codigo': item['payment_type__code'] or '',
+                'nombre': item['payment_type__name'] or 'Sin tipo',
+                'cantidad': item['cantidad'],
+                'monto_total': float(item['monto_total'] or Decimal('0.00')),
+                'porcentaje_del_total': float((item['monto_total'] / monto_total * 100) if monto_total > 0 else Decimal('0.00')),
+            }
+        
+        # 3. Pagos agrupados por método de pago
+        pagos_por_metodo = {}
+        pagos_por_metodo_data = payments_qs.values('payment_method').annotate(
+            cantidad=Count('id'),
+            monto_total=Sum('final_amount', output_field=DecimalField(max_digits=12, decimal_places=2))
+        ).order_by('-monto_total')
+        
+        # Si final_amount es None, usar amount
+        for item in pagos_por_metodo_data:
+            if item['monto_total'] is None or item['monto_total'] == Decimal('0.00'):
+                metodo = item['payment_method']
+                metodo_pagos = payments_qs.filter(payment_method=metodo)
+                monto_recalc = metodo_pagos.aggregate(
+                    total=Sum('amount', output_field=DecimalField(max_digits=12, decimal_places=2))
+                )['total'] or Decimal('0.00')
+                item['monto_total'] = monto_recalc
+        
+        for item in pagos_por_metodo_data:
+            metodo_key = item['payment_method'] or 'SIN_METODO'
+            pagos_por_metodo[metodo_key] = {
+                'metodo': item['payment_method'],
+                'metodo_display': dict(Payment.PAYMENT_METHODS).get(item['payment_method'], item['payment_method']),
+                'cantidad': item['cantidad'],
+                'monto_total': float(item['monto_total'] or Decimal('0.00')),
+                'porcentaje_del_total': float((item['monto_total'] / monto_total * 100) if monto_total > 0 else Decimal('0.00')),
+            }
+        
+        # 4. Pagos por mes (últimos 12 meses o rango especificado)
+        pagos_por_mes = {}
+        monthly_data = payments_qs.annotate(
+            year_extracted=ExtractYear('payment_date'),
+            month_extracted=ExtractMonth('payment_date')
+        ).values('year_extracted', 'month_extracted').annotate(
+            cantidad=Count('id'),
+            monto_total=Sum('final_amount', output_field=DecimalField(max_digits=12, decimal_places=2))
+        ).order_by('year_extracted', 'month_extracted')
+        
+        # Si final_amount es None, usar amount
+        for item in monthly_data:
+            if item['monto_total'] is None or item['monto_total'] == Decimal('0.00'):
+                year = item['year_extracted']
+                month = item['month_extracted']
+                month_pagos = payments_qs.filter(
+                    payment_date__year=year,
+                    payment_date__month=month
+                )
+                monto_recalc = month_pagos.aggregate(
+                    total=Sum('amount', output_field=DecimalField(max_digits=12, decimal_places=2))
+                )['total'] or Decimal('0.00')
+                item['monto_total'] = monto_recalc
+        
+        meses_es = {
+            1: 'Enero', 2: 'Febrero', 3: 'Marzo', 4: 'Abril',
+            5: 'Mayo', 6: 'Junio', 7: 'Julio', 8: 'Agosto',
+            9: 'Septiembre', 10: 'Octubre', 11: 'Noviembre', 12: 'Diciembre'
+        }
+        
+        for item in monthly_data:
+            month_key = f"{item['year_extracted']}-{str(item['month_extracted']).zfill(2)}"
+            pagos_por_mes[month_key] = {
+                'año': item['year_extracted'],
+                'mes': item['month_extracted'],
+                'mes_nombre': meses_es.get(item['month_extracted'], ''),
+                'cantidad': item['cantidad'],
+                'monto_total': float(item['monto_total'] or Decimal('0.00')),
+            }
+        
+        # 5. Top estudiantes por monto pagado
+        top_estudiantes = payments_qs.values(
+            'student__id',
+            'student__carnet',
+            'student__first_name',
+            'student__first_last_name',
+            'student__second_last_name'
+        ).annotate(
+            cantidad_pagos=Count('id'),
+            monto_total=Sum('final_amount', output_field=DecimalField(max_digits=12, decimal_places=2))
+        ).order_by('-monto_total')[:10]
+        
+        # Si final_amount es None, usar amount
+        for item in top_estudiantes:
+            if item['monto_total'] is None or item['monto_total'] == Decimal('0.00'):
+                student_id = item['student__id']
+                student_pagos = payments_qs.filter(student_id=student_id)
+                monto_recalc = student_pagos.aggregate(
+                    total=Sum('amount', output_field=DecimalField(max_digits=12, decimal_places=2))
+                )['total'] or Decimal('0.00')
+                item['monto_total'] = monto_recalc
+        
+        top_estudiantes_list = []
+        for item in top_estudiantes:
+            nombre_completo = f"{item['student__first_name'] or ''} {item['student__first_last_name'] or ''} {item['student__second_last_name'] or ''}".strip()
+            top_estudiantes_list.append({
+                'carnet': item['student__carnet'] or '',
+                'nombre_completo': nombre_completo,
+                'cantidad_pagos': item['cantidad_pagos'],
+                'monto_total': float(item['monto_total'] or Decimal('0.00')),
+            })
+        
+        return Response({
+            'resumen_general': {
+                'total_pagos': total_pagos,
+                'monto_total': float(monto_total),
+                'promedio_por_pago': float(promedio_pago),
+                'rango_fechas': {
+                    'inicio': start_date.isoformat() if start_date else None,
+                    'fin': end_date.isoformat() if end_date else None,
+                }
+            },
+            'pagos_por_tipo': pagos_por_tipo,
+            'pagos_por_metodo': pagos_por_metodo,
+            'pagos_por_mes': pagos_por_mes,
+            'top_estudiantes': top_estudiantes_list,
+        }, status=status.HTTP_200_OK)

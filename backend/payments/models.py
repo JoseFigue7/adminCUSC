@@ -343,7 +343,8 @@ class Payment(models.Model):
             # Las transferencias pueden ser NO_PAGADO (para colegiaturas mensuales) o PENDIENTE
             elif self.payment_method == 'EFECTIVO':
                 # Aprobar automáticamente pagos en efectivo
-                # Ignorar cualquier status que se haya establecido manualmente
+                # Incluso si el estado inicial era NO_PAGADO o MORA (para colegiaturas)
+                # Cuando se registra un pago en efectivo, debe aprobarse automáticamente
                 self.status = 'APROBADO'
                 # Si no hay usuario aprobador, usar el creador
                 if not self.approved_by and self.created_by:

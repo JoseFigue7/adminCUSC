@@ -50,6 +50,8 @@ class PreAssignCoursesService:
     def validate_schedule_overlaps(self, courses_to_assign):
         """
         Validar que no haya traslapes de horarios entre los cursos a asignar.
+        Solo valida traslapes entre cursos que tienen horarios asignados.
+        Los cursos sin horarios se permiten (pueden ser cursos en línea o con horarios flexibles).
         
         Args:
             courses_to_assign: Lista de cursos a validar
@@ -60,18 +62,16 @@ class PreAssignCoursesService:
         errors = []
         courses_list = list(courses_to_assign)
         
-        for i, course1 in enumerate(courses_list):
-            schedules1 = list(course1.schedules.all())
-            if not schedules1:
-                errors.append(f"El curso {course1.code} - {course1.name} no tiene horarios asignados.")
-                continue
-            
-            for j, course2 in enumerate(courses_list[i+1:], start=i+1):
-                schedules2 = list(course2.schedules.all())
-                if not schedules2:
-                    errors.append(f"El curso {course2.code} - {course2.name} no tiene horarios asignados.")
-                    continue
-                
+        # Filtrar solo cursos que tienen horarios para validar traslapes
+        courses_with_schedules = []
+        for course in courses_list:
+            schedules = list(course.schedules.all())
+            if schedules:
+                courses_with_schedules.append((course, schedules))
+        
+        # Solo validar traslapes entre cursos que tienen horarios
+        for i, (course1, schedules1) in enumerate(courses_with_schedules):
+            for j, (course2, schedules2) in enumerate(courses_with_schedules[i+1:], start=i+1):
                 # Verificar traslapes entre horarios de course1 y course2
                 for schedule1 in schedules1:
                     for schedule2 in schedules2:

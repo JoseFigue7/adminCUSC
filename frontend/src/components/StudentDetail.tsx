@@ -447,7 +447,27 @@ const StudentDetail: React.FC = () => {
                           success('Contrato generado exitosamente');
                         } catch (err: any) {
                           console.error('Error generating contract:', err);
-                          const errorMessage = err.response?.data?.detail || err.response?.data?.error || 'Error al generar el contrato';
+                          let errorMessage = 'Error al generar el contrato';
+                          
+                          // Si la respuesta es un blob (error), intentar leerlo como texto
+                          if (err.response?.data instanceof Blob) {
+                            try {
+                              const text = await err.response.data.text();
+                              const errorData = JSON.parse(text);
+                              errorMessage = errorData.detail || errorData.error || errorMessage;
+                            } catch (parseError) {
+                              // Si no se puede parsear, usar el mensaje por defecto
+                              errorMessage = err.response?.status === 500 
+                                ? 'Error interno del servidor al generar el contrato. Por favor, verifique los logs del servidor.'
+                                : errorMessage;
+                            }
+                          } else if (err.response?.data) {
+                            // Si es JSON normal
+                            errorMessage = err.response.data.detail || err.response.data.error || errorMessage;
+                          } else if (err.message) {
+                            errorMessage = err.message;
+                          }
+                          
                           error(errorMessage);
                         }
                       }}

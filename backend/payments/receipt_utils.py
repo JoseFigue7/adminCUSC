@@ -91,6 +91,25 @@ def generate_payment_receipt_pdf(payment):
         except Exception as logo_error:
             logger.warning(f'Error al cargar logo: {str(logo_error)}')
         
+        # Formatear fecha en español
+        months_es = {
+            1: 'enero', 2: 'febrero', 3: 'marzo', 4: 'abril',
+            5: 'mayo', 6: 'junio', 7: 'julio', 8: 'agosto',
+            9: 'septiembre', 10: 'octubre', 11: 'noviembre', 12: 'diciembre'
+        }
+        
+        # Fecha de emisión del recibo
+        now = timezone.now()
+        formatted_date = f"{now.day} de {months_es[now.month]} de {now.year}"
+        
+        # Fecha de pago (si existe)
+        payment_date_formatted = None
+        if payment.payment_date:
+            payment_date_formatted = f"{payment.payment_date.day} de {months_es[payment.payment_date.month]} de {payment.payment_date.year}"
+        
+        # Usar ID del pago como número de recibo si no hay receipt_number
+        receipt_number = payment.receipt_number or str(payment.id)[:8].upper()
+        
         # Preparar datos para el template
         context = {
             'payment': payment,
@@ -98,8 +117,9 @@ def generate_payment_receipt_pdf(payment):
             'payment_type': payment_type,
             'logo_base64': logo_base64,
             'institution_name': 'Colegio Santa Cecilia',
-            'date': timezone.now().strftime('%d de %B de %Y'),
-            'receipt_number': payment.receipt_number or 'N/A',
+            'date': formatted_date,
+            'payment_date_formatted': payment_date_formatted,
+            'receipt_number': receipt_number,
             'amount': payment.final_amount or payment.amount or Decimal('0.00'),
             'payment_method_display': payment.get_payment_method_display(),
             'status_display': payment.get_status_display(),

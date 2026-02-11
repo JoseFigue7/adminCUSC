@@ -348,6 +348,19 @@ export const updateDocumentStatus = documentsApi.updateStatus;
 export const getEnrollment = enrollmentsApi.get;
 export const generateContract = enrollmentsApi.generateContract;
 
+// Reports API
+export const reportsApi = {
+  overview: (params?: any) => api.get('/reports/overview/', { params }),
+  students: (params?: any) => api.get('/reports/students/', { params }),
+  payments: (params?: any) => api.get('/reports/payments/', { params }),
+  academics: (params?: any) => api.get('/reports/academics/', { params }),
+  scholarships: (params?: any) => api.get('/reports/scholarships/', { params }),
+  paymentsDetailed: (params?: any) => api.get('/reports/payments/detailed/', { params }),
+  executive: (params?: any) => api.get('/reports/executive/', { params }),
+  exportStudents: (params?: any) => api.get('/reports/export/students/', { params, responseType: 'blob' }),
+  exportPayments: (params?: any) => api.get('/reports/export/payments/', { params, responseType: 'blob' }),
+};
+
 // Graduation Method functions
 export const getGraduationMethod = (studentId?: string | number) => {
   if (studentId) {

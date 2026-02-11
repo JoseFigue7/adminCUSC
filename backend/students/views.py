@@ -388,19 +388,36 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             # Generar contrato si no existe, o regenerar si ya existe
             pdf_file = generate_contract(enrollment.student, enrollment)
             
+            # Leer el contenido del PDF antes de guardarlo (el BytesIO se consume al guardar)
+            pdf_file.seek(0)
+            pdf_content = pdf_file.read()
+            
+            # Validar que el contenido del PDF no esté vacío
+            if not pdf_content or len(pdf_content) == 0:
+                raise ValueError('El PDF generado está vacío')
+            
             # Guardar el archivo generado
             if not enrollment.student.carnet:
                 filename = f"contrato_{enrollment.student.id}_{enrollment.school_year or datetime.now().year}.pdf"
             else:
                 filename = f"contrato_{enrollment.student.carnet}_{enrollment.school_year or datetime.now().year}.pdf"
             
-            enrollment.contract_file.save(filename, pdf_file, save=False)
+            # Crear un nuevo BytesIO con el contenido para guardar
+            from io import BytesIO
+            import os
+            from django.conf import settings
+            
+            # Asegurar que el directorio de contratos existe
+            contracts_dir = os.path.join(settings.MEDIA_ROOT, 'contracts')
+            os.makedirs(contracts_dir, exist_ok=True)
+            
+            pdf_file_for_save = BytesIO(pdf_content)
+            enrollment.contract_file.save(filename, pdf_file_for_save, save=False)
             enrollment.contract_generated = True
             enrollment.save()
             
-            # Retornar el PDF para descarga/impresión
-            pdf_file.seek(0)
-            response = HttpResponse(pdf_file.read(), content_type='application/pdf')
+            # Retornar el PDF para descarga/impresión usando el contenido leído
+            response = HttpResponse(pdf_content, content_type='application/pdf')
             response['Content-Disposition'] = f'inline; filename="{filename}"'  # inline para mostrar en navegador
             return response
         except Exception as e:

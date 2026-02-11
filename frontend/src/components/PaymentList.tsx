@@ -53,6 +53,9 @@ const PaymentList: React.FC = () => {
   const [ordering, setOrdering] = useState<string>('-payment_date');
   const [pendingCount, setPendingCount] = useState<number>(0);
   const [exporting, setExporting] = useState<boolean>(false);
+  const [showExportModal, setShowExportModal] = useState<boolean>(false);
+  const [exportDateFrom, setExportDateFrom] = useState<string>('');
+  const [exportDateTo, setExportDateTo] = useState<string>('');
 
   const loadPaymentTypes = useCallback(async () => {
     try {
@@ -329,7 +332,20 @@ const PaymentList: React.FC = () => {
     }
   };
 
-  const handleExportCsv = async () => {
+  const handleOpenExportModal = () => {
+    // Inicializar con las fechas de los filtros actuales si existen
+    setExportDateFrom(filters.payment_date_from || '');
+    setExportDateTo(filters.payment_date_to || '');
+    setShowExportModal(true);
+  };
+
+  const handleCloseExportModal = () => {
+    setShowExportModal(false);
+    setExportDateFrom('');
+    setExportDateTo('');
+  };
+
+  const handleExportCsv = async (useDateRange: boolean = false) => {
     setExporting(true);
     try {
       // Limpiar filtros vacíos antes de exportar
@@ -341,6 +357,20 @@ const PaymentList: React.FC = () => {
         }
       });
       
+      // Si se especifica un rango de fechas para exportación, usarlo en lugar de los filtros
+      if (useDateRange) {
+        if (exportDateFrom) {
+          cleanFilters.payment_date_from = exportDateFrom;
+        } else {
+          delete cleanFilters.payment_date_from;
+        }
+        if (exportDateTo) {
+          cleanFilters.payment_date_to = exportDateTo;
+        } else {
+          delete cleanFilters.payment_date_to;
+        }
+      }
+      
       // Agregar ordenamiento
       const params = { ...cleanFilters, ordering };
       
@@ -350,15 +380,38 @@ const PaymentList: React.FC = () => {
       const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement('a');
       const url = URL.createObjectURL(blob);
+      
+      // Generar nombre de archivo con rango de fechas si está disponible
+      let filename = `pagos_${new Date().toISOString().split('T')[0]}.csv`;
+      if (useDateRange && exportDateFrom && exportDateTo) {
+        const fromDate = exportDateFrom.replace(/-/g, '');
+        const toDate = exportDateTo.replace(/-/g, '');
+        filename = `pagos_${fromDate}_${toDate}.csv`;
+      } else if (useDateRange && exportDateFrom) {
+        const fromDate = exportDateFrom.replace(/-/g, '');
+        filename = `pagos_desde_${fromDate}.csv`;
+      } else if (useDateRange && exportDateTo) {
+        const toDate = exportDateTo.replace(/-/g, '');
+        filename = `pagos_hasta_${toDate}.csv`;
+      }
+      
       link.setAttribute('href', url);
-      link.setAttribute('download', `pagos_${new Date().toISOString().split('T')[0]}.csv`);
+      link.setAttribute('download', filename);
       link.style.visibility = 'hidden';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
       
-      success(`Exportación exitosa: ${totalItems} pago(s) exportado(s)`);
+      const dateRangeText = useDateRange && (exportDateFrom || exportDateTo) 
+        ? ` (${exportDateFrom || 'inicio'} - ${exportDateTo || 'fin'})`
+        : '';
+      success(`Exportación exitosa${dateRangeText}`);
+      
+      // Cerrar el modal después de exportar
+      if (useDateRange) {
+        handleCloseExportModal();
+      }
     } catch (err: any) {
       console.error('Error exporting payments:', err);
       const errorMessage = err.response?.data?.detail || err.response?.data?.error || 'Error al exportar pagos';
@@ -393,9 +446,9 @@ const PaymentList: React.FC = () => {
           <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
             <button
               className="btn btn-secondary btn-large"
-              onClick={handleExportCsv}
-              disabled={exporting || totalItems === 0}
-              title="Exportar pagos filtrados a CSV"
+              onClick={handleOpenExportModal}
+              disabled={exporting}
+              title="Exportar pagos a CSV con rango de fechas"
             >
               <FiDownload /> {exporting ? 'Exportando...' : 'Exportar CSV'}
             </button>
