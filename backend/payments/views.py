@@ -12,6 +12,24 @@ from students.models import Student
 from academics.models import Career
 from users.permissions import HasPermission
 from decimal import Decimal
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def _resolve_payment_type(value):
+    """Resuelve payment_type por UUID o por código / 'code - name'."""
+    if not value:
+        return None
+    s = str(value).strip()
+    try:
+        import uuid
+        uuid.UUID(s)
+        return PaymentType.objects.filter(id=s).first()
+    except (ValueError, TypeError):
+        pass
+    code = s.split(' - ')[0].strip() if ' - ' in s else s
+    return PaymentType.objects.filter(code=code, is_active=True).first()
 
 
 class PaymentViewSet(viewsets.ModelViewSet):
@@ -46,6 +64,134 @@ class PaymentViewSet(viewsets.ModelViewSet):
         
         # No establecer status aquí, el modelo lo maneja automáticamente
         serializer.save(**save_data)
+    
+    @action(detail=False, methods=['post'])
+    def create_enrollment_payment(self, request):
+        """
+        Endpoint específico para crear pagos de inscripción (100 y 101)
+        Maneja la lógica de forma más simple sin depender de _calculate_amounts()
+        """
+        from decimal import Decimal
+        from .models import Payment, PaymentType
+        from students.models import Student
+        from django.utils import timezone
+        
+        student_id = request.data.get('student')
+        payment_type_id = request.data.get('payment_type')
+        payment_method = request.data.get('payment_method', 'EFECTIVO')
+        original_amount = request.data.get('original_amount')
+        year = request.data.get('year')
+        month = request.data.get('month')
+        receipt_number = request.data.get('receipt_number', '')
+        
+        # Validaciones básicas
+        if not student_id:
+            return Response({'error': 'El estudiante es requerido'}, status=status.HTTP_400_BAD_REQUEST)
+        if not payment_type_id:
+            return Response({'error': 'El tipo de pago es requerido'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        payment_type = _resolve_payment_type(payment_type_id)
+        if not payment_type:
+            return Response({'error': 'Tipo de pago no encontrado. Use el ID (UUID) o el código (ej. 100).'}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            student = Student.objects.get(id=student_id)
+        except Student.DoesNotExist:
+            return Response({'error': 'Estudiante no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Validar que sea pago 100 o 101
+        if payment_type.code not in ['100', '101']:
+            return Response(
+                {'error': 'Este endpoint solo es para pagos de inscripción (100 o 101)'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Determinar el monto
+        if payment_type.code == '100':
+            # Pago 100 es gratis
+            amount_value = Decimal('0.00')
+            payment_method = 'EFECTIVO'  # Forzar efectivo para pago gratis
+        elif payment_type.code == '101':
+            # Pago 101 tiene costo
+            if original_amount:
+                try:
+                    amount_value = Decimal(str(original_amount))
+                except (ValueError, TypeError):
+                    return Response({'error': 'Monto inválido'}, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                # Obtener el monto de PaymentConfiguration
+                if not student.career:
+                    return Response(
+                        {'error': 'El estudiante no tiene una carrera asignada'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                try:
+                    from .models import PaymentConfiguration
+                    payment_config = PaymentConfiguration.objects.get(
+                        career=student.career,
+                        is_active=True
+                    )
+                    amount_value = payment_config.enrollment_fee or Decimal('0.00')
+                except PaymentConfiguration.DoesNotExist:
+                    return Response(
+                        {'error': f'No se encontró configuración de pago para la carrera {student.career.name}'},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+        else:
+            amount_value = Decimal('0.00')
+        
+        # Generar número de recibo automáticamente si es efectivo y no se proporcionó
+        if payment_method == 'EFECTIVO' and not receipt_number:
+            from .receipt_utils import generate_receipt_number
+            receipt_number = generate_receipt_number()
+        
+        # Crear el pago de forma simple
+        try:
+            payment = Payment.objects.create(
+                student=student,
+                career=student.career,
+                payment_type=payment_type,
+                payment_method=payment_method,
+                original_amount=amount_value,
+                final_amount=amount_value,
+                amount=amount_value,  # Para compatibilidad
+                scholarship_discount_amount=Decimal('0.00'),
+                penalty_amount=Decimal('0.00'),
+                year=year,
+                month=month,
+                payment_date=timezone.now().date(),
+                status='APROBADO' if payment_type.code == '100' or payment_method == 'EFECTIVO' else 'PENDIENTE',
+                receipt_number=receipt_number if payment_method == 'EFECTIVO' else '',
+                created_by=request.user if request.user.is_authenticated else None,
+                approved_by=request.user if (payment_type.code == '100' or payment_method == 'EFECTIVO') and request.user.is_authenticated else None,
+                approved_at=timezone.now() if (payment_type.code == '100' or payment_method == 'EFECTIVO') else None,
+            )
+            
+            # Generar y enviar recibo automáticamente
+            try:
+                from .receipt_utils import generate_payment_receipt_pdf, send_receipt_email
+                pdf_file = generate_payment_receipt_pdf(payment)
+                send_receipt_email(payment, pdf_file)
+            except Exception as receipt_error:
+                logger.warning(f'Error al generar/enviar recibo automáticamente: {str(receipt_error)}')
+                # No fallar la creación del pago si hay error con el recibo
+            
+            serializer = self.get_serializer(payment)
+            response_data = serializer.data
+            # Agregar información sobre el recibo generado
+            response_data['receipt_generated'] = True
+            response_data['receipt_number'] = payment.receipt_number
+            return Response(response_data, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            import logging
+            import traceback
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error al crear pago de inscripción: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return Response(
+                {'error': f'Error al crear el pago: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     def perform_update(self, serializer):
         """Pasar el usuario actual al modelo para aprobación automática"""

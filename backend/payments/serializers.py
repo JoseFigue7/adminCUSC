@@ -1,5 +1,38 @@
+import uuid as uuid_module
 from rest_framework import serializers
 from .models import Payment, Scholarship, PaymentConfiguration, PaymentType
+
+
+class PaymentTypePrimaryKeyField(serializers.Field):
+    """
+    Acepta UUID del tipo de pago, o código (ej. "100"), o formato "code - name"
+    para evitar ValidationError cuando el frontend envía el nombre en lugar del ID.
+    """
+    def to_internal_value(self, data):
+        if data is None or data == '':
+            return None
+        s = str(data).strip()
+        # Intentar como UUID
+        try:
+            uuid_module.UUID(s)
+            pt = PaymentType.objects.filter(id=s).first()
+            if pt:
+                return pt.id
+        except (ValueError, TypeError):
+            pass
+        # Intentar como código o "code - name" (ej. "100 - Inscripción al Cuatrimestre - Gratis")
+        code = s.split(' - ')[0].strip() if ' - ' in s else s
+        pt = PaymentType.objects.filter(code=code, is_active=True).first()
+        if pt:
+            return pt.id
+        raise serializers.ValidationError(
+            f'Tipo de pago no encontrado para "{data}". Use el ID (UUID) o el código del tipo de pago.'
+        )
+
+    def to_representation(self, value):
+        if value is None:
+            return None
+        return str(value.id) if hasattr(value, 'id') else str(value)
 
 
 class PaymentSerializer(serializers.ModelSerializer):
@@ -20,6 +53,8 @@ class PaymentSerializer(serializers.ModelSerializer):
     approved_by_name = serializers.CharField(source='approved_by.get_full_name', read_only=True)
     approved_by_username = serializers.CharField(source='approved_by.username', read_only=True)
     
+    payment_type = PaymentTypePrimaryKeyField(allow_null=True, required=False)
+
     class Meta:
         model = Payment
         fields = '__all__'
