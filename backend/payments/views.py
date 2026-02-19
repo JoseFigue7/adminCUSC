@@ -76,7 +76,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
         if payment_type_id:
             from .models import PaymentType
             try:
-                payment_type = PaymentType.objects.select_for_update().get(id=payment_type_id)
+                payment_type = PaymentType.objects.get(id=payment_type_id)
                 # Asignar el objeto payment_type para que esté disponible en save()
                 serializer.validated_data['payment_type'] = payment_type
             except PaymentType.DoesNotExist:
