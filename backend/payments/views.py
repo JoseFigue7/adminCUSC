@@ -21,6 +21,21 @@ from decimal import Decimal
 logger = logging.getLogger(__name__)
 
 
+def _resolve_payment_type(value):
+    """Resuelve payment_type por UUID o por código / 'code - name'."""
+    if not value:
+        return None
+    s = str(value).strip()
+    try:
+        import uuid
+        uuid.UUID(s)
+        return PaymentType.objects.filter(id=s).first()
+    except (ValueError, TypeError):
+        pass
+    code = s.split(' - ')[0].strip() if ' - ' in s else s
+    return PaymentType.objects.filter(code=code, is_active=True).first()
+
+
 class PaymentViewSet(viewsets.ModelViewSet):
     queryset = Payment.objects.all()
     serializer_class = PaymentSerializer
@@ -151,13 +166,13 @@ class PaymentViewSet(viewsets.ModelViewSet):
         if not payment_type_id:
             return Response({'error': 'El tipo de pago es requerido'}, status=status.HTTP_400_BAD_REQUEST)
         
+        payment_type = _resolve_payment_type(payment_type_id)
+        if not payment_type:
+            return Response({'error': 'Tipo de pago no encontrado. Use el ID (UUID) o el código (ej. 100).'}, status=status.HTTP_404_NOT_FOUND)
         try:
             student = Student.objects.get(id=student_id)
-            payment_type = PaymentType.objects.get(id=payment_type_id)
         except Student.DoesNotExist:
             return Response({'error': 'Estudiante no encontrado'}, status=status.HTTP_404_NOT_FOUND)
-        except PaymentType.DoesNotExist:
-            return Response({'error': 'Tipo de pago no encontrado'}, status=status.HTTP_404_NOT_FOUND)
         
         # Validar que sea pago 100 o 101
         if payment_type.code not in ['100', '101']:
