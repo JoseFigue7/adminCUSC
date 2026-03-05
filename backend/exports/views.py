@@ -88,12 +88,12 @@ class ExportViewSet(viewsets.ViewSet):
                 status__in=['EN_CURSO', 'MATRICULADO']
             ).select_related('course')
             
-            # Obtener códigos de cursos (máximo 5)
-            course_codes = [enrollment.course.code for enrollment in course_enrollments[:5]]
+            # Obtener nombres de cursos (máximo 5)
+            course_names = [enrollment.course.name for enrollment in course_enrollments[:5]]
             
             # Completar hasta 5 cursos con strings vacíos si es necesario
-            while len(course_codes) < 5:
-                course_codes.append('')
+            while len(course_names) < 5:
+                course_names.append('')
             
             # Preparar datos del estudiante
             row = [
@@ -102,7 +102,7 @@ class ExportViewSet(viewsets.ViewSet):
                 student.first_last_name or '',  # Solo primer apellido según el ejemplo
                 student.email or '',
                 student.moodle_password or '',  # Contraseña de Moodle
-            ] + course_codes
+            ] + course_names
             
             writer.writerow(row)
         

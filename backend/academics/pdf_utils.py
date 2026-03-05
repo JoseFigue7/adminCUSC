@@ -736,7 +736,7 @@ def generate_payment_voucher(cuatrimestre_enrollment):
             <div style="margin-top: 12px; margin-bottom: 12px;">
                 <p style="margin: 2px 0; font-size: 9pt; font-weight: bold;">Información Bancaria:</p>
                 <p style="margin: 2px 0; font-size: 9pt;">
-                    <strong>Nombre o Razón Social:</strong> Centro de Capacitación Santa Cecilia S.C. | 
+                    <strong>Nombre o Razón Social:</strong> Colegio Santa Cecilia | 
                     <strong>Banco:</strong> Banco Santander | 
                     <strong>No. Cuenta:</strong> 65-50781653-0 | 
                     <strong>Clave:</strong> 014180655078165306

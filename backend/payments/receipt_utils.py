@@ -120,7 +120,7 @@ def generate_payment_receipt_pdf(payment):
             'date': formatted_date,
             'payment_date_formatted': payment_date_formatted,
             'receipt_number': receipt_number,
-            'amount': payment.final_amount or payment.amount or Decimal('0.00'),
+            'amount': getattr(payment, 'final_amount', None) or payment.amount or Decimal('0.00'),
             'payment_method_display': payment.get_payment_method_display(),
             'status_display': payment.get_status_display(),
         }

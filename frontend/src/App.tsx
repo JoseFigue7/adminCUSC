@@ -23,6 +23,8 @@ import PaymentsDetailedReport from './components/PaymentsDetailedReport';
 import ExecutiveReport from './components/ExecutiveReport';
 import Login from './components/Login';
 import Register from './components/Register';
+import ForgotPassword from './components/ForgotPassword';
+import ResetPassword from './components/ResetPassword';
 import UserProfile from './components/UserProfile';
 import StudentAccounting from './components/StudentAccounting';
 import PublicPayment from './components/PublicPayment';
@@ -162,6 +164,8 @@ function AppContent() {
           <Routes>
             <Route path="/login" element={isAuthenticated ? <Navigate to="/" replace /> : <Login />} />
             <Route path="/register" element={isAuthenticated ? <Navigate to="/" replace /> : <Register />} />
+            <Route path="/forgot-password" element={isAuthenticated ? <Navigate to="/" replace /> : <ForgotPassword />} />
+            <Route path="/reset-password" element={isAuthenticated ? <Navigate to="/" replace /> : <ResetPassword />} />
             <Route path="/profile" element={<ProtectedRoute><UserProfile /></ProtectedRoute>} />
             <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/students" element={<ProtectedRoute requirePermission="manage_students"><StudentList /></ProtectedRoute>} />

@@ -102,6 +102,23 @@ const Login: React.FC = () => {
               </>
             )}
           </button>
+          
+          <div style={{ textAlign: 'center', marginTop: '1rem' }}>
+            <a 
+              href="/forgot-password" 
+              onClick={(e) => {
+                e.preventDefault();
+                navigate('/forgot-password');
+              }}
+              style={{ 
+                color: 'var(--primary-color)', 
+                textDecoration: 'none',
+                fontSize: '0.9rem'
+              }}
+            >
+              ¿Olvidaste tu contraseña?
+            </a>
+          </div>
         </form>
       </div>
     </div>

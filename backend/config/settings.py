@@ -229,9 +229,9 @@ if DEBUG:
 # Django Jazzmin Configuration
 JAZZMIN_SETTINGS = {
     # Título del sitio
-    "site_title": "AdminCUSC",
-    "site_header": "AdminCUSC",
-    "site_brand": "AdminCUSC",
+    "site_title": "Colegio Santa Cecilia",
+    "site_header": "Colegio Santa Cecilia",
+    "site_brand": "Colegio Santa Cecilia",
     "site_logo": None,
     "login_logo": None,
     "login_logo_dark": None,
@@ -239,8 +239,8 @@ JAZZMIN_SETTINGS = {
     "site_icon": None,
     
     # Welcome message
-    "welcome_sign": "Bienvenido a AdminCUSC",
-    "copyright": "AdminCUSC",
+    "welcome_sign": "Bienvenido a Colegio Santa Cecilia",
+    "copyright": "Colegio Santa Cecilia",
     "search_model": ["students.Student", "users.User"],
     
     # UI personalización
@@ -369,6 +369,8 @@ SERVER_EMAIL = DEFAULT_FROM_EMAIL  # Email para errores del servidor
 
 # Timeout para conexiones SMTP (en segundos)
 EMAIL_TIMEOUT = config('EMAIL_TIMEOUT', default=10, cast=int)
+# Frontend URL para enlaces en emails
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:3000')
 
 
 # Stripe Configuration

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { reportsApi } from '../services/api';
-import { FiDownload, FiCalendar, FiDollarSign, FiUser, FiCheckCircle, FiClock, FiXCircle, FiTrendingUp } from '../utils/icons';
+import { FiDownload, FiCalendar, FiDollarSign, FiUser, FiCheckCircle, FiClock, FiXCircle, FiTrendingUp, FiFile } from '../utils/icons';
 import { useToast } from '../hooks/useToast';
 import './shared.css';
 
@@ -89,6 +89,37 @@ const PaymentsDetailedReport: React.FC = () => {
       error(errorMessage);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const exportToExcel = async () => {
+    if (!startDate || !endDate) {
+      error('Por favor, selecciona un rango de fechas antes de exportar');
+      return;
+    }
+
+    try {
+      const response = await reportsApi.exportPaymentsExcel({
+        start_date: startDate,
+        end_date: endDate,
+      });
+      
+      const blob = new Blob([response.data], { 
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+      });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `reporte_pagos_detallado_${startDate}_${endDate}.xlsx`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      success('Reporte exportado a Excel exitosamente');
+    } catch (err: any) {
+      console.error('Error exporting to Excel:', err);
+      error('Error al exportar el reporte a Excel');
     }
   };
 
@@ -257,9 +288,14 @@ const PaymentsDetailedReport: React.FC = () => {
           <div className="card">
             <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h2>Resumen</h2>
-              <button className="btn btn-secondary" onClick={exportToCSV}>
-                <FiDownload /> Exportar CSV
-              </button>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button className="btn btn-primary" onClick={exportToExcel}>
+                  <FiFile /> Exportar Excel
+                </button>
+                <button className="btn btn-secondary" onClick={exportToCSV}>
+                  <FiDownload /> Exportar CSV
+                </button>
+              </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
               <div className="stat-card">

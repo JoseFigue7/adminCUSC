@@ -43,14 +43,14 @@ class Command(BaseCommand):
         
         try:
             send_mail(
-                subject='Prueba de Email - AdminCUSC',
+                subject='Prueba de Email - Colegio Santa Cecilia',
                 message='''
-Este es un mensaje de prueba del sistema AdminCUSC.
+Este es un mensaje de prueba del sistema Colegio Santa Cecilia.
 
 Si recibes este correo, significa que la configuración de email está funcionando correctamente.
 
 Saludos,
-Sistema AdminCUSC
+Colegio Santa Cecilia
                 ''',
                 from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@admincusc.local'),
                 recipient_list=[email_destino],

@@ -552,19 +552,21 @@ class ConfirmCourseAssignmentService:
             payment_date = datetime(current_year, first_month, 1).date()
             
             # Crear un solo pago con monto 0 para todo el cuatrimestre
-            payment = Payment.objects.create(
+            payment = Payment(
                 student=self.student,
                 payment_type=tuition_payment_type,
                 payment_method='TRANSFERENCIA',
-                original_amount=Decimal('0.00'),
+                amount=Decimal('0.00'),
                 month=first_month,
                 year=current_year,
                 payment_date=payment_date,
                 due_date=due_date,
-                status='APROBADO',  # Beca completa se marca como aprobado automáticamente
                 cuatrimestre_enrollment=self.cuatrimestre_enrollment,
                 notes=f'Colegiatura completa con beca completa - Cuatrimestre completo pagado (monto: $0.00)'
             )
+            # Establecer status después para evitar aprobación automática
+            payment.status = 'APROBADO'  # Beca completa se marca como aprobado automáticamente
+            payment.save()
             return [str(payment.id)]
         
         # Para media beca o sin beca, generar pagos mensuales (uno por cada mes del período)
@@ -592,24 +594,26 @@ class ConfirmCourseAssignmentService:
                 else:
                     due_date = datetime(current_year, month, due_day).date()
             
-            # Crear pago con estado inicial NO_PAGADO y fecha programada al día 1
+            # Crear pago con estado inicial PENDIENTE y fecha programada al día 1
             notes = f'Colegiatura mensual - {dict(Payment.MONTHS)[month]} {current_year}'
             if scholarship_type == 'MEDIA':
                 notes += ' (Media beca - 50% descuento aplicado)'
             
-            payment = Payment.objects.create(
+            payment = Payment(
                 student=self.student,
                 payment_type=tuition_payment_type,
                 payment_method='TRANSFERENCIA',  # Por defecto, se puede cambiar
-                original_amount=monthly_amount,
+                amount=monthly_amount,
                 month=month,
                 year=current_year,
                 payment_date=payment_date,  # Fecha programada: día 1 del mes
                 due_date=due_date,
-                status='NO_PAGADO',  # Estado inicial: NO_PAGADO
                 cuatrimestre_enrollment=self.cuatrimestre_enrollment,
                 notes=notes
             )
+            # Establecer status después para evitar aprobación automática
+            payment.status = 'PENDIENTE'  # Estado inicial: PENDIENTE (no se aprueba automáticamente)
+            payment.save()
             payments_created.append(str(payment.id))
         
         return payments_created
@@ -717,12 +721,12 @@ class ConfirmCourseAssignmentService:
             student=self.student,
             payment_type=tuition_payment_type,
             payment_method='TRANSFERENCIA',  # Por defecto, se puede cambiar
-            original_amount=discounted_amount,
+            amount=discounted_amount,
             month=first_month,
             year=current_year,
             payment_date=payment_date,  # Fecha programada: día 1 del primer mes
             due_date=due_date,
-            status='NO_PAGADO',  # Estado inicial: NO_PAGADO
+            status='PENDIENTE',  # Estado inicial: PENDIENTE
             cuatrimestre_enrollment=self.cuatrimestre_enrollment,
             notes=f'Pago completo de colegiatura con 10% descuento. Monto original: {total_cuatrimestre}, Descuento: {total_cuatrimestre * Decimal("0.10")}, Pago mensual base: {base_monthly_amount}, Adicionales cursos: {course_additionals}'
         )

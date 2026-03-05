@@ -241,7 +241,20 @@ const PaymentForm: React.FC = () => {
       }));
     } catch (err: any) {
       if (err.response?.status === 404) {
-        const errorMsg = 'No se encontró ningún pago pendiente para este estudiante y tipo de pago';
+        const debugInfo = err.response?.data?.debug_info;
+        let errorMsg = 'No se encontró ningún pago pendiente para este estudiante y tipo de pago';
+        
+        if (debugInfo) {
+          console.log('Debug info:', debugInfo);
+          if (debugInfo.total_payments === 0) {
+            errorMsg = 'No se han generado pagos para este estudiante. Primero debe confirmar la asignación de cursos.';
+          } else if (debugInfo.approved_payments === debugInfo.total_payments) {
+            errorMsg = 'Todos los pagos de este tipo ya están aprobados.';
+          } else {
+            errorMsg = `No hay pagos pendientes. Total: ${debugInfo.total_payments}, Aprobados: ${debugInfo.approved_payments}, Pendientes: ${debugInfo.pending_payments}`;
+          }
+        }
+        
         setErrors({ ...errors, payment_type: errorMsg });
         setFoundPayment(null);
         // No mostrar toast de error aquí, solo establecer el error en el campo
@@ -283,9 +296,7 @@ const PaymentForm: React.FC = () => {
 
     // Validaciones específicas por método de pago (no aplican para pago 100 gratis)
     if (!isFreePayment) {
-      if (payment.payment_method === 'TRANSFERENCIA' && !receiptFile) {
-        newErrors.receipt = 'El comprobante de transferencia es requerido';
-      }
+      // El comprobante de transferencia ya no es requerido, funciona igual que el efectivo
       // El número de recibo se genera automáticamente para efectivo, no es requerido
       // if (payment.payment_method === 'EFECTIVO' && !payment.receipt_number.trim()) {
       //   newErrors.receipt_number = 'El número de recibo es requerido';
@@ -900,7 +911,7 @@ const PaymentForm: React.FC = () => {
             <div className="form-section">
               <h3 className="section-title">Comprobante de Transferencia</h3>
               <div className="form-group">
-                <label>Comprobante de Transferencia *</label>
+                <label>Comprobante de Transferencia (Opcional)</label>
                 <div className="file-upload-area">
                   <input
                     type="file"

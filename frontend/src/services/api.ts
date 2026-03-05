@@ -359,6 +359,8 @@ export const reportsApi = {
   executive: (params?: any) => api.get('/reports/executive/', { params }),
   exportStudents: (params?: any) => api.get('/reports/export/students/', { params, responseType: 'blob' }),
   exportPayments: (params?: any) => api.get('/reports/export/payments/', { params, responseType: 'blob' }),
+  exportPaymentsExcel: (params?: any) => api.get('/reports/export/payments/excel/', { params, responseType: 'blob' }),
+  exportExecutivePDF: (params?: any) => api.get('/reports/export/executive/pdf/', { params, responseType: 'blob' }),
 };
 
 // Graduation Method functions
