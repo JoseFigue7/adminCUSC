@@ -41,6 +41,8 @@ urlpatterns = [
     path('api/reports/', include('reports.urls')),  # Rutas de reportes
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
+    # SPA: cualquier ruta no capturada (login, dashboard, etc.) sirve index.html para React Router
+    path('<path:path>', FrontendIndexView.as_view()),
 ]
 
 if settings.DEBUG:
