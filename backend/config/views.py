@@ -8,10 +8,9 @@ from django.views.generic import View
 
 class FrontendIndexView(View):
     """
-    Sirve el index.html del frontend (React) en la ruta raíz /.
-    Necesario para que la SPA cargue al acceder a https://dominio/ o https://ip/
+    Sirve el index.html del frontend (React) en la ruta raíz / y en rutas SPA (login, dashboard, etc.).
     """
-    def get(self, request):
+    def get(self, request, path=None):
         index_path = settings.FRONTEND_BUILD_DIR / 'index.html'
         if not index_path.exists():
             return HttpResponse(
