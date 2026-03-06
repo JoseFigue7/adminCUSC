@@ -1,7 +1,7 @@
 """
 Vistas de configuración del proyecto (ej. servir SPA en raíz).
 """
-from django.http import HttpResponse
+from django.http import HttpResponse, FileResponse, Http404
 from django.conf import settings
 from django.views.generic import View
 
@@ -23,3 +23,12 @@ class FrontendIndexView(View):
             )
         content = index_path.read_text(encoding='utf-8')
         return HttpResponse(content, content_type='text/html')
+
+
+def serve_frontend_asset(request, filename):
+    """Sirve manifest.json, favicon.ico, etc. desde la raíz del build del frontend."""
+    path = settings.FRONTEND_BUILD_DIR / filename
+    if not path.exists() or not path.is_file():
+        raise Http404
+    content_type = 'application/json' if filename.endswith('.json') else None
+    return FileResponse(path.open('rb'), content_type=content_type)

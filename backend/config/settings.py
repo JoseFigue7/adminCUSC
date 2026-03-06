@@ -148,9 +148,10 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
-# Carpeta del build del frontend (React). Para servir la SPA en / y que collectstatic incluya sus estáticos.
+# Carpeta del build del frontend (React). Solo build/static/ para que /static/js/ y /static/css/ coincidan con el index.html.
 FRONTEND_BUILD_DIR = BASE_DIR.parent / 'frontend' / 'build'
-STATICFILES_DIRS = [str(FRONTEND_BUILD_DIR)] if FRONTEND_BUILD_DIR.exists() else []
+_frontend_static = FRONTEND_BUILD_DIR / 'static'
+STATICFILES_DIRS = [str(_frontend_static)] if _frontend_static.exists() else []
 
 # WhiteNoise: CompressedStaticFilesStorage evita fallos por .map u otros archivos referenciados faltantes
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedStaticFilesStorage'
