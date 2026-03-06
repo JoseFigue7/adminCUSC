@@ -148,6 +148,10 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
+# Carpeta del build del frontend (React). Para servir la SPA en / y que collectstatic incluya sus estáticos.
+FRONTEND_BUILD_DIR = BASE_DIR.parent / 'frontend' / 'build'
+STATICFILES_DIRS = [str(FRONTEND_BUILD_DIR)] if FRONTEND_BUILD_DIR.exists() else []
+
 # WhiteNoise configuration para servir archivos estáticos en producción
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
