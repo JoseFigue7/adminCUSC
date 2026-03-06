@@ -26,9 +26,15 @@ class FrontendIndexView(View):
 
 
 def serve_frontend_asset(request, filename):
-    """Sirve manifest.json, favicon.ico, etc. desde la raíz del build del frontend."""
+    """Sirve manifest.json, favicon.ico, SC Logo.png, etc. desde la raíz del build del frontend."""
     path = settings.FRONTEND_BUILD_DIR / filename
     if not path.exists() or not path.is_file():
         raise Http404
-    content_type = 'application/json' if filename.endswith('.json') else None
+    content_type = None
+    if filename.endswith('.json'):
+        content_type = 'application/json'
+    elif filename.lower().endswith('.png'):
+        content_type = 'image/png'
+    elif filename.lower().endswith('.ico'):
+        content_type = 'image/x-icon'
     return FileResponse(path.open('rb'), content_type=content_type)

@@ -28,6 +28,7 @@ urlpatterns = [
     path('', FrontendIndexView.as_view()),
     path('manifest.json', serve_frontend_asset, {'filename': 'manifest.json'}),
     path('favicon.ico', serve_frontend_asset, {'filename': 'favicon.ico'}),
+    path('SC Logo.png', serve_frontend_asset, {'filename': 'SC Logo.png'}),
     path('admin/', admin.site.urls),
     path('api/', include('users.urls')),
     path('api/students/', include('students.urls')),
