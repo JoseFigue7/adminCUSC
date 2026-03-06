@@ -152,8 +152,8 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 FRONTEND_BUILD_DIR = BASE_DIR.parent / 'frontend' / 'build'
 STATICFILES_DIRS = [str(FRONTEND_BUILD_DIR)] if FRONTEND_BUILD_DIR.exists() else []
 
-# WhiteNoise configuration para servir archivos estáticos en producción
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+# WhiteNoise: CompressedStaticFilesStorage evita fallos por .map u otros archivos referenciados faltantes
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedStaticFilesStorage'
 
 MEDIA_URL = 'media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
