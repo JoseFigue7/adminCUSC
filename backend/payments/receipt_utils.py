@@ -3,7 +3,7 @@ Utilidades para generar recibos de pago en PDF y enviarlos por correo
 """
 from django.template.loader import render_to_string
 from django.http import HttpResponse
-from weasyprint import HTML
+from config.weasyprint_lazy import get_html
 from django.utils import timezone
 from decimal import Decimal
 import io
@@ -70,7 +70,7 @@ def generate_payment_receipt_pdf(payment):
     """
     try:
         import base64
-        import os
+        from pathlib import Path
         from django.conf import settings
         
         student = payment.student
@@ -79,9 +79,9 @@ def generate_payment_receipt_pdf(payment):
         # Cargar el logo
         logo_base64 = None
         try:
-            logo_path = settings.BASE_DIR.parent / 'frontend' / 'public' / 'SC Logo.png'
+            logo_path = Path(settings.BASE_DIR).parent / 'frontend' / 'public' / 'SC Logo.png'
             if not logo_path.exists():
-                logo_path = os.path.join(settings.BASE_DIR, 'students', 'static', 'students', 'contracts', 'logo.png')
+                logo_path = Path(settings.BASE_DIR) / 'students' / 'static' / 'students' / 'contracts' / 'logo.png'
             
             if logo_path.exists():
                 with open(logo_path, 'rb') as logo_file:
@@ -129,6 +129,7 @@ def generate_payment_receipt_pdf(payment):
         html_string = render_to_string('payments/receipt.html', context)
         
         # Generar PDF
+        HTML = get_html()
         html = HTML(string=html_string, base_url=settings.BASE_DIR)
         pdf_file = io.BytesIO()
         html.write_pdf(pdf_file)

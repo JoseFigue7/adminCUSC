@@ -11,6 +11,25 @@ from .models import (
 )
 
 
+def _resolve_base_monthly_from_catalog_or_config(career, payment_type_102):
+    """
+    Monto base mensual de colegiatura: primero PaymentType 102.amount;
+    si es 0 o nulo, usa PaymentConfiguration.monthly_amount de la carrera (mismo criterio que get_payment_amount).
+    """
+    amt = payment_type_102.amount or Decimal('0.00')
+    if amt > Decimal('0.00'):
+        return amt
+    if not career:
+        return Decimal('0.00')
+    try:
+        from payments.models import PaymentConfiguration
+
+        conf = PaymentConfiguration.objects.get(career=career, is_active=True)
+        return conf.monthly_amount or Decimal('0.00')
+    except Exception:
+        return Decimal('0.00')
+
+
 class PreAssignCoursesService:
     """
     Servicio para pre-asignar cursos a un CuatrimestreEnrollment.
@@ -278,18 +297,15 @@ class ConfirmCourseAssignmentService:
         if self.cuatrimestre_enrollment.status == 'CURSOS_PREASIGNADOS':
             can_confirm = True
         elif self.cuatrimestre_enrollment.status == 'PENDIENTE_PAGO':
-            # Verificar si ya hay pagos de colegiatura generados
-            try:
-                tuition_payment_type = PaymentType.objects.get(code='201')
-                existing_payments = Payment.objects.filter(
-                    cuatrimestre_enrollment=self.cuatrimestre_enrollment,
-                    payment_type=tuition_payment_type
-                )
-                # Si no hay pagos, permitir confirmar (confirmación incompleta)
-                if not existing_payments.exists():
-                    can_confirm = True
-            except PaymentType.DoesNotExist:
-                # Si no existe el tipo de pago, permitir confirmar
+            # Verificar si ya hay pagos de colegiatura (102/103/105, igual que payment_voucher)
+            tuition_types = PaymentType.objects.filter(
+                code__in=['102', '103', '105'], is_active=True
+            )
+            existing_payments = Payment.objects.filter(
+                cuatrimestre_enrollment=self.cuatrimestre_enrollment,
+                payment_type__in=tuition_types,
+            )
+            if not existing_payments.exists():
                 can_confirm = True
         
         if not can_confirm:
@@ -466,9 +482,12 @@ class ConfirmCourseAssignmentService:
         # Obtener monto base mensual del tipo de pago 102 (para calcular el monto real)
         try:
             base_payment_type = PaymentType.objects.get(code='102', is_active=True)
-            base_monthly_amount = base_payment_type.amount or Decimal('0.00')
+            base_monthly_amount = _resolve_base_monthly_from_catalog_or_config(career, base_payment_type)
             if base_monthly_amount == 0:
-                logger.warning('Tipo de pago 102 (Colegiatura de Cursos) no tiene monto configurado. No se generan pagos.')
+                logger.warning(
+                    'Colegiatura mensual en 0: tipo 102 sin monto en catálogo y sin monthly_amount en '
+                    'PaymentConfiguration para la carrera. No se generan pagos.'
+                )
                 return []
         except PaymentType.DoesNotExist:
             logger.error('Tipo de pago 102 (Colegiatura de Cursos) no encontrado. Ejecute el comando seed_payment_types.')
@@ -634,11 +653,14 @@ class ConfirmCourseAssignmentService:
         # Obtener monto base mensual del tipo de pago 102 (Colegiatura de Cursos)
         try:
             tuition_payment_type = PaymentType.objects.get(code='102', is_active=True)
-            base_monthly_amount = tuition_payment_type.amount or Decimal('0.00')
+            base_monthly_amount = _resolve_base_monthly_from_catalog_or_config(career, tuition_payment_type)
             if base_monthly_amount == 0:
                 import logging
                 logger = logging.getLogger(__name__)
-                logger.warning('Tipo de pago 102 (Colegiatura de Cursos) no tiene monto configurado. No se genera pago.')
+                logger.warning(
+                    'Pago único no generado: tipo 102 sin monto en catálogo y sin monthly_amount en '
+                    'PaymentConfiguration para la carrera.'
+                )
                 return None
         except PaymentType.DoesNotExist:
             import logging
@@ -732,4 +754,80 @@ class ConfirmCourseAssignmentService:
         )
         
         return [str(payment.id)]
-    
+
+    @transaction.atomic
+    def regenerate_monthly_tuition_if_missing(self):
+        """
+        Inscripción ya EN_CURSO pero sin pagos 102/103/105 (p. ej. el monto del catálogo 102 era 0 al confirmar).
+        Crea el plan mensual usando la lógica actual (incluye fallback a PaymentConfiguration).
+        """
+        from payments.models import Payment, PaymentType
+
+        if self.cuatrimestre_enrollment.status != 'EN_CURSO':
+            return {
+                'success': False,
+                'message': 'Solo aplica cuando la inscripción al cuatrimestre está en EN_CURSO.',
+                'payments_created': [],
+                'errors': [],
+            }
+        tuition_types = PaymentType.objects.filter(code__in=['102', '103', '105'], is_active=True)
+        existing = Payment.objects.filter(
+            cuatrimestre_enrollment=self.cuatrimestre_enrollment,
+            payment_type__in=tuition_types,
+        )
+        if existing.exists():
+            return {
+                'success': False,
+                'message': 'Ya existen pagos de colegiatura para esta inscripción.',
+                'payments_created': [str(p.id) for p in existing],
+                'errors': [],
+            }
+        created = self._generate_monthly_payments()
+        return {
+            'success': len(created) > 0,
+            'message': (
+                f'Se generaron {len(created)} pago(s) mensuales.'
+                if created
+                else 'No se generaron pagos. Revise PaymentType 102 y PaymentConfiguration.monthly_amount para la carrera.'
+            ),
+            'payments_created': created,
+            'errors': [],
+            'no_payments_reason': 'no_cost' if not created else None,
+        }
+
+
+def maybe_finalize_cuatrimestre_after_course_grade(cuatrimestre_enrollment_id):
+    """
+    Si la inscripción al cuatrimestre está EN_CURSO y todos los cursos matriculados
+    tienen estado final (APROBADO, REPROBADO o RETIRADO), y los aprobados/reprobados
+    tienen nota final, pasa la inscripción a FINALIZADO.
+    """
+    if not cuatrimestre_enrollment_id:
+        return
+
+    with transaction.atomic():
+        ce = (
+            CuatrimestreEnrollment.objects.select_for_update()
+            .filter(pk=cuatrimestre_enrollment_id, status='EN_CURSO')
+            .first()
+        )
+        if not ce:
+            return
+
+        rows = list(
+            CourseEnrollment.objects.select_for_update().filter(cuatrimestre_enrollment=ce)
+        )
+        if not rows:
+            return
+
+        for row in rows:
+            if row.status in ('MATRICULADO', 'EN_CURSO'):
+                return
+            if row.status in ('APROBADO', 'REPROBADO') and row.final_grade is None:
+                return
+
+        ce.status = 'FINALIZADO'
+        ce._status_change_notes = (
+            'Cierre automático: todos los cursos del cuatrimestre tienen calificación o estado final.'
+        )
+        ce.save(update_fields=['status', 'updated_at'])

@@ -16,7 +16,7 @@ Si sigue fallando, **compila en tu Mac** y sube el build:
 # En tu Mac
 cd frontend && npm run build
 # Subir solo la carpeta build (por rsync o comprimir y subir)
-rsync -avz build/ usuario@137.184.188.234:/var/www/admincusc/frontend/build/
+rsync -avz build/ usuario@146.190.37.214:/var/www/admincusc/frontend/build/
 ```
 
 ## Collectstatic

@@ -1,8 +1,8 @@
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
-from django.db.models import Q, Sum, Count, Avg
-from django.db.models.functions import TruncDate
+from django.db.models import Q, Sum, Count, Avg, DecimalField
+from django.db.models.functions import TruncDate, Coalesce
 from datetime import datetime, timedelta, date
 from .models import Payment, Scholarship, PaymentConfiguration, PaymentType
 from .serializers import PaymentSerializer, ScholarshipSerializer, PaymentConfigurationSerializer, PaymentTypeSerializer, PublicPaymentSerializer
@@ -43,7 +43,11 @@ class PaymentViewSet(viewsets.ModelViewSet):
     
     def get_permissions(self):
         """Permisos específicos por acción"""
-        if self.action in ['list', 'retrieve', 'student_status', 'statistics', 'pending_count', 'pending_transfers', 'students_with_overdue', 'download_receipt']:
+        if self.action in [
+            'list', 'retrieve', 'student_status', 'statistics', 'pending_count',
+            'pending_transfers', 'students_with_overdue', 'download_receipt',
+            'find_oldest_unpaid', 'get_payment_amount',
+        ]:
             # Permitir ver a usuarios autenticados
             return [permissions.IsAuthenticated()]
         # Para crear/editar/eliminar/aprobar/rechazar requiere permiso específico
@@ -347,6 +351,77 @@ class PaymentViewSet(viewsets.ModelViewSet):
             'pending_count': pending_students.count(),
             'students': serializer.data
         })
+
+    def _payment_assignment_diagnostic(self, student_id, payment_type_id):
+        """
+        Explica discrepancias entre matrículas en cursos (CourseEnrollment) y cuotas (Payment).
+        Se adjunta a debug_info cuando no hay pago pendiente del tipo solicitado.
+        """
+        from academics.models import CourseEnrollment, CuatrimestreEnrollment
+
+        with_ce = CourseEnrollment.objects.filter(
+            student_id=student_id, cuatrimestre_enrollment__isnull=False
+        ).count()
+        without_ce = CourseEnrollment.objects.filter(
+            student_id=student_id, cuatrimestre_enrollment__isnull=True
+        ).count()
+
+        rows = (
+            CuatrimestreEnrollment.objects.filter(student_id=student_id)
+            .select_related('cuatrimestre')
+            .order_by('-enrollment_date')[:12]
+        )
+        cuat_summary = []
+        for r in rows:
+            cuat_summary.append({
+                'id': str(r.id),
+                'status': r.status,
+                'status_display': r.get_status_display(),
+                'academic_year': r.academic_year,
+                'cuatrimestre_name': r.cuatrimestre.name if r.cuatrimestre else '',
+            })
+
+        selected_pt = PaymentType.objects.filter(pk=payment_type_id).first()
+        selected_code = (selected_pt.code or '').strip() if selected_pt else ''
+
+        tuition_codes = ['102', '103', '105']
+        counts_by_code = {}
+        for code in tuition_codes:
+            pt = PaymentType.objects.filter(code=code, is_active=True).first()
+            if pt:
+                n = Payment.objects.filter(student_id=student_id, payment_type=pt).count()
+                if n:
+                    counts_by_code[code] = n
+
+        hint = None
+        if selected_code in tuition_codes and counts_by_code and selected_code not in counts_by_code:
+            hint = (
+                'Hay pagos de colegiatura con otro código ('
+                + ', '.join(counts_by_code.keys())
+                + f') pero ninguno con {selected_code}. Pruebe el tipo de pago que corresponda a la beca.'
+            )
+
+        pt102 = PaymentType.objects.filter(code='102', is_active=True).first()
+        catalog_102 = str(pt102.amount) if pt102 and pt102.amount is not None else None
+        config_monthly = None
+        try:
+            st = Student.objects.filter(pk=student_id).select_related('career').first()
+            if st and st.career_id:
+                pc = PaymentConfiguration.objects.filter(career_id=st.career_id, is_active=True).first()
+                if pc and pc.monthly_amount is not None:
+                    config_monthly = str(pc.monthly_amount)
+        except Exception:
+            pass
+
+        return {
+            'course_enrollments_with_cuatrimestre': with_ce,
+            'course_enrollments_without_cuatrimestre': without_ce,
+            'cuatrimestre_enrollments': cuat_summary,
+            'tuition_payment_row_count_by_code': counts_by_code,
+            'tuition_payment_hint': hint,
+            'payment_type_102_catalog_amount': catalog_102,
+            'payment_configuration_monthly_amount': config_monthly,
+        }
     
     @action(detail=False, methods=['get'])
     def find_oldest_unpaid(self, request):
@@ -396,23 +471,33 @@ class PaymentViewSet(viewsets.ModelViewSet):
             if not unpaid_payment:
                 # Si no hay pagos pendientes, verificar si hay pagos aprobados
                 approved_count = all_payments.filter(status='APROBADO').count()
+                pending_like = all_payments.filter(
+                    status__in=['PENDIENTE', 'EN_REVISION']
+                ).count()
                 
                 # Obtener todos los status únicos para depuración
                 unique_statuses = list(all_payments.values_list('status', flat=True).distinct())
+
+                # Diagnóstico: matrículas vs cuotas (explica casos con cursos en pantalla pero 0 pagos 102)
+                assignment_diagnostic = self._payment_assignment_diagnostic(student_id, payment_type_id)
                 
+                # 200 (no 404): no hay pago pendiente que abonar; el front muestra mensaje sin XHR rojo
                 return Response(
                     {
-                        'error': 'No se encontró ningún pago pendiente para este estudiante y tipo de pago',
+                        'unpaid_payment': None,
+                        'message': 'No se encontró ningún pago pendiente para este estudiante y tipo de pago',
                         'debug_info': {
                             'total_payments': total_count,
                             'approved_payments': approved_count,
+                            'pending_payments': pending_like,
                             'status_counts': status_counts,
                             'unique_statuses': unique_statuses,
                             'student_id': student_id,
-                            'payment_type_id': payment_type_id
-                        }
+                            'payment_type_id': payment_type_id,
+                            **assignment_diagnostic,
+                        },
                     },
-                    status=status.HTTP_404_NOT_FOUND
+                    status=status.HTTP_200_OK,
                 )
             
             serializer = self.get_serializer(unpaid_payment)
@@ -425,13 +510,67 @@ class PaymentViewSet(viewsets.ModelViewSet):
             
             payment_data['final_amount'] = str(final_amount)
             
-            return Response(payment_data)
+            return Response(
+                {
+                    'unpaid_payment': payment_data,
+                    'message': None,
+                    'debug_info': None,
+                },
+                status=status.HTTP_200_OK,
+            )
         except Exception as e:
             import traceback
             return Response(
                 {'error': f'Error al buscar pago pendiente: {str(e)}', 'traceback': traceback.format_exc()},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+    
+    @action(detail=False, methods=['get'])
+    def get_payment_amount(self, request):
+        """
+        Monto sugerido para registrar un pago según estudiante y tipo de pago.
+        Usado por el panel (PaymentForm) cuando el tipo no trae monto fijo en catálogo.
+        """
+        student_id = request.query_params.get('student_id')
+        payment_type_id = request.query_params.get('payment_type_id')
+        if not student_id or not payment_type_id:
+            return Response(
+                {'error': 'student_id y payment_type_id son requeridos'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            student = Student.objects.select_related('career').get(pk=student_id)
+        except Student.DoesNotExist:
+            return Response({'error': 'Estudiante no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        pt = PaymentType.objects.filter(pk=payment_type_id, is_active=True).first()
+        if not pt:
+            return Response({'error': 'Tipo de pago no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+        
+        amount_decimal = None
+        if pt.amount is not None and pt.amount > Decimal('0.00'):
+            amount_decimal = pt.amount
+        elif student.career_id:
+            try:
+                conf = PaymentConfiguration.objects.get(career=student.career, is_active=True)
+            except PaymentConfiguration.DoesNotExist:
+                return Response({
+                    'amount': None,
+                    'detail': 'No hay configuración de pagos para la carrera del estudiante.',
+                })
+            code = (pt.code or '').strip()
+            if code in ('010', '011', '101'):
+                fee = conf.enrollment_fee
+                amount_decimal = fee if fee is not None else Decimal('0.00')
+            elif code == '102':
+                amount_decimal = conf.monthly_amount
+            elif code == '103':
+                amount_decimal = (conf.monthly_amount * Decimal('0.50')).quantize(Decimal('0.01'))
+            elif code == '105':
+                amount_decimal = Decimal('0.00')
+        
+        if amount_decimal is None:
+            return Response({'amount': None, 'detail': 'Sin monto sugerido; ingréselo manualmente.'})
+        return Response({'amount': str(amount_decimal)})
     
     @action(detail=True, methods=['patch'])
     def approve(self, request, pk=None):
@@ -566,6 +705,87 @@ class PaymentViewSet(viewsets.ModelViewSet):
                 {'error': f'Error al generar el recibo: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+    
+    @action(
+        detail=False,
+        methods=['get'],
+        url_path=r'student_accounting/(?P<student_id>[^/.]+)',
+    )
+    def student_accounting(self, request, student_id=None):
+        """
+        Estado de cuenta: resumen, deudas pendientes e historial de pagos del estudiante.
+        Usado por el frontend en /students/:id/accounting.
+        """
+        try:
+            student = Student.objects.select_related('career').get(pk=student_id, is_active=True)
+        except Student.DoesNotExist:
+            return Response({'error': 'Estudiante no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+
+        payments_qs = (
+            Payment.objects.filter(student=student)
+            .select_related('payment_type')
+            .order_by('-payment_date', '-created_at')
+        )
+        approved = payments_qs.filter(status='APROBADO')
+        pending = payments_qs.filter(status__in=['PENDIENTE', 'EN_REVISION'])
+
+        eff = Coalesce('final_amount', 'amount', output_field=DecimalField(max_digits=12, decimal_places=2))
+        total_paid = approved.annotate(_eff=eff).aggregate(s=Sum('_eff'))['s'] or Decimal('0.00')
+        total_debt = pending.annotate(_eff=eff).aggregate(s=Sum('_eff'))['s'] or Decimal('0.00')
+        balance = total_paid - total_debt
+
+        pending_debts = []
+        for p in pending.order_by('year', 'month', 'due_date', 'created_at'):
+            base = p.base_amount
+            if base is None and p.amount is not None:
+                pen = p.penalty_amount or Decimal('0.00')
+                base = p.amount - pen
+                if base < Decimal('0.00'):
+                    base = p.amount
+            elif base is None:
+                base = Decimal('0.00')
+            penalty = p.penalty_amount or Decimal('0.00')
+            line_total = p.final_amount if p.final_amount is not None else p.amount
+            if line_total is None:
+                line_total = base + penalty
+            pt = p.payment_type
+            pending_debts.append(
+                {
+                    'month': p.month,
+                    'month_display': p.get_month_display() if p.month is not None else 'N/A',
+                    'year': p.year or 0,
+                    'amount': float(line_total),
+                    'base_amount': float(base),
+                    'penalty_amount': float(penalty),
+                    'payment_type': (
+                        {'id': str(pt.id), 'code': pt.code, 'name': pt.name}
+                        if pt
+                        else {'id': '', 'code': '', 'name': 'N/A'}
+                    ),
+                }
+            )
+
+        serializer = PaymentSerializer(payments_qs, many=True, context={'request': request})
+        return Response(
+            {
+                'student': {
+                    'id': str(student.id),
+                    'carnet': student.carnet,
+                    'full_name': student.get_full_name(),
+                    'email': student.email or '',
+                },
+                'summary': {
+                    'total_paid': float(total_paid),
+                    'total_debt': float(total_debt),
+                    'balance': float(balance),
+                    'total_payments': payments_qs.count(),
+                    'approved_payments': approved.count(),
+                    'pending_payments': pending.count(),
+                },
+                'pending_debts': pending_debts,
+                'payments': serializer.data,
+            }
+        )
     
     @action(detail=False, methods=['get'])
     def students_with_overdue(self, request):
@@ -835,7 +1055,10 @@ class PaymentViewSet(viewsets.ModelViewSet):
 class ScholarshipViewSet(viewsets.ModelViewSet):
     queryset = Scholarship.objects.all()
     serializer_class = ScholarshipSerializer
-    permission_classes = [permissions.IsAuthenticated, HasPermission('manage_scholarships')]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_permissions(self):
+        return [permissions.IsAuthenticated(), HasPermission('manage_scholarships')]
     
     def create(self, request, *args, **kwargs):
         """Crear beca y verificar límites por facultad"""
@@ -871,7 +1094,10 @@ class ScholarshipViewSet(viewsets.ModelViewSet):
 class PaymentConfigurationViewSet(viewsets.ModelViewSet):
     queryset = PaymentConfiguration.objects.filter(is_active=True)
     serializer_class = PaymentConfigurationSerializer
-    permission_classes = [permissions.IsAuthenticated, HasPermission('manage_settings')]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_permissions(self):
+        return [permissions.IsAuthenticated(), HasPermission('manage_settings')]
 
 
 class PaymentTypeViewSet(viewsets.ReadOnlyModelViewSet):

@@ -3,7 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.http import HttpResponse
 from django.template.loader import render_to_string
-from weasyprint import HTML
+from config.weasyprint_lazy import get_html
 import io
 from datetime import datetime
 
@@ -100,6 +100,7 @@ class AcademicCertificateViewSet(viewsets.ModelViewSet):
             }
             
             html_string = render_to_string('certificates/academic_certificate.html', context)
+            HTML = get_html()
             html = HTML(string=html_string, base_url=request.build_absolute_uri('/'))
             pdf_file = html.write_pdf()
             
@@ -219,6 +220,7 @@ class CourseCertificateViewSet(viewsets.ModelViewSet):
             }
             
             html_string = render_to_string('certificates/course_certificate.html', context)
+            HTML = get_html()
             html = HTML(string=html_string, base_url=request.build_absolute_uri('/'))
             pdf_file = html.write_pdf()
             
@@ -431,6 +433,7 @@ class UniversityTitleViewSet(viewsets.ModelViewSet):
             }
             
             html_string = render_to_string('certificates/university_title.html', context)
+            HTML = get_html()
             html = HTML(string=html_string, base_url=request.build_absolute_uri('/'))
             pdf_file = html.write_pdf()
             

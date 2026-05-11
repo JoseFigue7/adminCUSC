@@ -27,7 +27,13 @@ class Payment(models.Model):
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    student = models.ForeignKey('students.Student', on_delete=models.CASCADE, related_name='payments', verbose_name='Estudiante')
+    student = models.ForeignKey(
+        'students.Student',
+        on_delete=models.PROTECT,
+        related_name='payments',
+        verbose_name='Estudiante',
+        help_text='No se puede eliminar el estudiante mientras existan pagos asociados; borre o reasigne los pagos primero.',
+    )
     career = models.ForeignKey(
         'academics.Career',
         on_delete=models.PROTECT,
@@ -93,6 +99,43 @@ class Payment(models.Model):
     transaction_id = models.CharField(max_length=100, blank=True, verbose_name='ID de transacción')
     
     notes = models.TextField(blank=True, verbose_name='Notas')
+
+    # Desglose de montos y Stripe (migraciones 0006–0007; deben existir en el modelo para que el ORM
+    # incluya columnas NOT NULL como scholarship_discount_amount en cada INSERT)
+    original_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal('0.00'))],
+        verbose_name='Monto original',
+        help_text='Monto sin beca ni mora (monto base del pago)',
+    )
+    scholarship_discount_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        validators=[MinValueValidator(Decimal('0.00'))],
+        verbose_name='Descuento por beca',
+        help_text='Monto de descuento aplicado según beca activa del estudiante',
+    )
+    final_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal('0.00'))],
+        verbose_name='Monto final',
+        help_text='Monto final: original_amount - scholarship_discount_amount + penalty_amount',
+    )
+    stripe_payment_intent_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        unique=True,
+        verbose_name='Stripe Payment Intent ID',
+        help_text='ID del Payment Intent de Stripe para rastrear el pago',
+    )
     
     # Trazabilidad: usuarios que crearon y aprobaron el pago
     created_by = models.ForeignKey(
@@ -129,7 +172,7 @@ class Payment(models.Model):
         return f"Pago de {self.student.get_full_name()} - {self.get_month_display() if self.month else 'N/A'} {self.year if self.year else ''}"
     
     def save(self, *args, **kwargs):
-        """Calcular mora automáticamente, asignar carrera y aprobar pagos según método"""
+        """Calcular mora, asignar carrera y auto-aprobar solo pagos sin inscripción a cuatrimestre."""
         from django.utils import timezone
         from django.core.exceptions import ValidationError
         
@@ -137,31 +180,28 @@ class Payment(models.Model):
         if not self.career and self.student and self.student.career:
             self.career = self.student.career
         
-        # Aprobar automáticamente todos los pagos al crear o actualizar (efectivo, tarjeta y transferencia)
         is_new_payment = not self.pk
         
-        # Si es un pago nuevo:
-        # - Solo aprobar si NO tiene cuatrimestre_enrollment (pagos generados automáticamente deben quedar pendientes)
-        # Si es una actualización (pago existente):
-        # - Aprobar automáticamente SIEMPRE que no esté ya aprobado o rechazado
-        #   (independientemente de si tiene cuatrimestre_enrollment, porque se está actualizando desde el formulario)
+        # Pagos ligados a inscripción al cuatrimestre (plan de colegiatura / inscripción generado) deben
+        # permanecer PENDIENTE o EN_REVISION hasta aprobación explícita (endpoint approve, efectivo, etc.).
+        # Solo los pagos "sueltos" (sin cuatrimestre_enrollment) se auto-aprueban al crear/actualizar
+        # para el flujo de caja inmediata del módulo de pagos.
+        has_cuatrimestre = bool(self.cuatrimestre_enrollment_id or self.cuatrimestre_enrollment)
         if is_new_payment:
-            # Para pagos nuevos: solo aprobar si no tienen cuatrimestre_enrollment
             should_auto_approve = (
-                not self.cuatrimestre_enrollment and 
-                self.status != 'APROBADO' and 
-                self.status != 'RECHAZADO'
+                not has_cuatrimestre
+                and self.status != 'APROBADO'
+                and self.status != 'RECHAZADO'
             )
         else:
-            # Para actualizaciones: aprobar automáticamente siempre que no esté ya aprobado o rechazado
-            # Esto permite que los pagos 102 (que tienen cuatrimestre_enrollment) se aprueben cuando se actualizan desde el formulario
+            # Igual que en creación: nunca auto-aprobar al editar un pago del plan de cuatrimestre
             should_auto_approve = (
-                self.status != 'APROBADO' and 
-                self.status != 'RECHAZADO'
+                not has_cuatrimestre
+                and self.status != 'APROBADO'
+                and self.status != 'RECHAZADO'
             )
         
         if should_auto_approve:
-            # Aprobar automáticamente todos los métodos de pago (efectivo, tarjeta y transferencia)
             self.status = 'APROBADO'
             # Si no hay usuario aprobador, usar el creador o el usuario actual
             if not self.approved_by:
@@ -193,6 +233,13 @@ class Payment(models.Model):
                 # El monto total sería base_amount + penalty_amount
                 if self.amount == self.base_amount:
                     self.amount = self.base_amount + self.penalty_amount
+        
+        if self.scholarship_discount_amount is None:
+            self.scholarship_discount_amount = Decimal('0.00')
+        if self.original_amount is None and self.amount is not None:
+            self.original_amount = self.amount
+        if self.final_amount is None and self.amount is not None:
+            self.final_amount = self.amount
         
         super().save(*args, **kwargs)
 

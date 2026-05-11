@@ -62,6 +62,40 @@ api.interceptors.response.use(
   }
 );
 
+/** Errores JSON cuando la petición usó responseType: 'blob' (Axios entrega el cuerpo como Blob). */
+export async function axiosBlobErrorMessage(err: unknown, fallback: string): Promise<string> {
+  const e = err as { response?: { data?: unknown }; message?: string };
+  const data = e.response?.data;
+  if (data instanceof Blob) {
+    try {
+      const text = await data.text();
+      if (!text.trim()) return fallback;
+      const parsed = JSON.parse(text) as {
+        error?: string;
+        message?: string;
+        detail?: string | unknown[];
+      };
+      if (typeof parsed.error === 'string') return parsed.error;
+      if (typeof parsed.message === 'string') return parsed.message;
+      if (typeof parsed.detail === 'string') return parsed.detail;
+      if (Array.isArray(parsed.detail)) {
+        return parsed.detail
+          .map((item) => (typeof item === 'string' ? item : JSON.stringify(item)))
+          .join('; ');
+      }
+    } catch {
+      return fallback;
+    }
+    return fallback;
+  }
+  if (data && typeof data === 'object' && 'error' in data) {
+    const msg = (data as { error?: unknown }).error;
+    if (typeof msg === 'string') return msg;
+  }
+  if (typeof e.message === 'string' && e.message) return e.message;
+  return fallback;
+}
+
 export default api;
 
 // Funciones de API específicas
@@ -134,8 +168,6 @@ export const paymentsApi = {
   downloadReceipt: (id: string | number) => api.get(`/payments/payments/${id}/download_receipt/`, { responseType: 'blob' }),
   sendReceiptEmail: (id: string | number) => api.post(`/payments/payments/${id}/send_receipt_email/`),
   exportCsv: (params?: any) => api.get('/payments/payments/export/csv/', { params, responseType: 'blob' }),
-  createPaymentIntent: (data: any) => api.post('/payments/public/payment-intent/', data),
-  processPublicPayment: (data: any) => api.post('/payments/public/payment/', data),
 };
 
 export const scholarshipsApi = {
@@ -194,6 +226,9 @@ export const academicsApi = {
     api.get(`/academics/cuatrimestre-enrollments/${id}/preview_boleta/`, { responseType: 'blob' }),
   confirmCourseAssignment: (id: string | number, paymentOption?: 'monthly' | 'full') => 
     api.post(`/academics/cuatrimestre-enrollments/${id}/confirm_course_assignment/`, { payment_option: paymentOption || 'monthly' }),
+  /** EN_CURSO sin pagos 102/103/105: genera plan mensual (tras corregir montos en catálogo/config). */
+  regenerateTuitionPayments: (id: string | number) =>
+    api.post(`/academics/cuatrimestre-enrollments/${id}/regenerate_tuition_payments/`, {}),
   getPaymentVoucher: (id: string | number) => 
     api.get(`/academics/cuatrimestre-enrollments/${id}/payment_voucher/`, { responseType: 'blob' }),
   // Payment and enrollment flow
@@ -317,8 +352,16 @@ export const findOldestUnpaidPayment = paymentsApi.findOldestUnpaid;
 export const getPaymentTypes = paymentTypesApi.list;
 export const getStudentByCarnet = (carnet: string) => 
   api.get('/payments/public/student/', { params: { carnet } });
-export const createPaymentIntent = paymentsApi.createPaymentIntent;
-export const processPublicPayment = paymentsApi.processPublicPayment;
+
+/** Pago público con Stripe (sin token de sesión). */
+export const createPaymentIntent = (data: {
+  carnet: string;
+  payment_type: string;
+  amount: number;
+}) => api.post('/payments/public/payment-intent/', data);
+
+export const processPublicPayment = (data: Record<string, unknown>) =>
+  api.post('/payments/public/payment/', data);
 
 // Scholarship functions
 export const getScholarships = scholarshipsApi.list;

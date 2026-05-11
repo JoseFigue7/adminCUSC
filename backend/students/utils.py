@@ -1,6 +1,6 @@
 from django.template.loader import render_to_string
 from django.http import HttpResponse
-from weasyprint import HTML
+from config.weasyprint_lazy import get_html
 import io
 import os
 from pathlib import Path
@@ -239,6 +239,7 @@ def generate_contract(student, enrollment):
 </html>"""
         
         # Generar PDF
+        HTML = get_html()
         html = HTML(string=html_string)
         pdf_file = io.BytesIO()
         html.write_pdf(pdf_file)

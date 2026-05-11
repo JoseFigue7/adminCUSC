@@ -1,0 +1,161 @@
+═══════════════════════════════════════════════════════════════
+  GUÍA PASO A PASO PARA DESPLEGAR EN EL SERVIDOR
+═══════════════════════════════════════════════════════════════
+
+Estás conectado como root en el servidor 137.184.188.234
+Ejecuta estos comandos UNO POR UNO:
+
+───────────────────────────────────────────────────────────────
+PASO 1: Actualizar el sistema
+───────────────────────────────────────────────────────────────
+
+apt update && apt upgrade -y
+
+───────────────────────────────────────────────────────────────
+PASO 2: Instalar dependencias básicas
+───────────────────────────────────────────────────────────────
+
+apt install -y python3.10 python3.10-venv python3-pip nginx git mysql-server python3-cffi python3-brotli libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libpangocairo-1.0-0 certbot python3-certbot-nginx
+
+───────────────────────────────────────────────────────────────
+PASO 3: Instalar Node.js usando NVM
+───────────────────────────────────────────────────────────────
+
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+nvm install --lts
+nvm use --lts
+
+───────────────────────────────────────────────────────────────
+PASO 4: Configurar MySQL
+───────────────────────────────────────────────────────────────
+
+mysql_secure_installation
+
+# Luego crear base de datos:
+mysql -u root -p
+
+# En MySQL, ejecuta:
+CREATE DATABASE admincusc_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'admincusc_user'@'localhost' IDENTIFIED BY 'TU_PASSWORD_SEGURA_AQUI';
+GRANT ALL PRIVILEGES ON admincusc_db.* TO 'admincusc_user'@'localhost';
+FLUSH PRIVILEGES;
+EXIT;
+
+───────────────────────────────────────────────────────────────
+PASO 5: Clonar el repositorio
+───────────────────────────────────────────────────────────────
+
+mkdir -p /var/www/admincusc
+cd /var/www/admincusc
+git clone https://github.com/JoseFigue7/adminCUSC.git .
+
+───────────────────────────────────────────────────────────────
+PASO 6: Configurar Backend
+───────────────────────────────────────────────────────────────
+
+cd /var/www/admincusc/backend
+python3.10 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# Generar SECRET_KEY:
+python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())'
+
+# Crear archivo .env:
+cp .env.example .env
+nano .env
+
+# Edita el .env con estos valores:
+# SECRET_KEY=EL_SECRET_KEY_QUE_GENERASTE
+# DEBUG=False
+# ALLOWED_HOSTS=137.184.188.234,localhost
+# USE_SQLITE=False
+# DB_NAME=admincusc_db
+# DB_USER=admincusc_user
+# DB_PASSWORD=TU_PASSWORD_DE_MYSQL
+# DB_HOST=localhost
+# DB_PORT=3306
+
+# Ejecutar migraciones:
+python manage.py migrate
+
+# Crear superusuario:
+python manage.py createsuperuser
+
+# Crear roles:
+python manage.py init_roles
+
+# Crear usuarios de prueba:
+python manage.py seed_test_users
+
+# Cargar datos iniciales:
+python manage.py seed_careers
+
+# Recolectar archivos estáticos:
+python manage.py collectstatic --noinput
+
+───────────────────────────────────────────────────────────────
+PASO 7: Configurar Frontend
+───────────────────────────────────────────────────────────────
+
+cd /var/www/admincusc/frontend
+export PATH="$HOME/.nvm/versions/node/$(nvm version)/bin:$PATH"
+npm install
+
+# Crear .env para frontend:
+cat > .env << 'ENVEOF'
+REACT_APP_API_URL=http://137.184.188.234/api
+PORT=3000
+ENVEOF
+
+npm run build
+
+───────────────────────────────────────────────────────────────
+PASO 8: Configurar Gunicorn
+───────────────────────────────────────────────────────────────
+
+cp /var/www/admincusc/admincusc.service.example /etc/systemd/system/admincusc.service
+systemctl daemon-reload
+systemctl enable admincusc
+systemctl start admincusc
+systemctl status admincusc
+
+───────────────────────────────────────────────────────────────
+PASO 9: Configurar Nginx
+───────────────────────────────────────────────────────────────
+
+cp /var/www/admincusc/nginx.conf /etc/nginx/sites-available/admincusc
+ln -sf /etc/nginx/sites-available/admincusc /etc/nginx/sites-enabled/
+rm -f /etc/nginx/sites-enabled/default
+nginx -t
+systemctl restart nginx
+
+───────────────────────────────────────────────────────────────
+PASO 10: Configurar Permisos
+───────────────────────────────────────────────────────────────
+
+chown -R www-data:www-data /var/www/admincusc/backend
+chown -R www-data:www-data /var/www/admincusc/backend/staticfiles
+chown -R www-data:www-data /var/www/admincusc/backend/media
+
+───────────────────────────────────────────────────────────────
+PASO 11: Configurar Firewall
+───────────────────────────────────────────────────────────────
+
+ufw allow OpenSSH
+ufw allow 'Nginx Full'
+ufw --force enable
+ufw status
+
+───────────────────────────────────────────────────────────────
+✅ ¡LISTO! URLs de acceso:
+───────────────────────────────────────────────────────────────
+
+- API: http://137.184.188.234/api/
+- Admin: http://137.184.188.234/admin/
+- Swagger: http://137.184.188.234/swagger/
+

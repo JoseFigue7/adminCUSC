@@ -1240,8 +1240,36 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
             'status': cuatrimestre_enrollment.status,
             'status_display': cuatrimestre_enrollment.get_status_display(),
             'payments_created': result['payments_created'],
-            'is_enrollment_fee_exempt': cuatrimestre_enrollment.is_enrollment_fee_exempt
+            'is_enrollment_fee_exempt': cuatrimestre_enrollment.is_enrollment_fee_exempt,
+            'no_payments_reason': result.get('no_payments_reason'),
         })
+
+    @action(detail=True, methods=['post'], url_path='regenerate_tuition_payments')
+    def regenerate_tuition_payments(self, request, pk=None):
+        """
+        Si la inscripción está EN_CURSO y no hay ningún pago 102/103/105, genera el plan mensual
+        (p. ej. tras corregir PaymentConfiguration o el monto del tipo 102).
+        """
+        cuatrimestre_enrollment = self.get_object()
+        service = ConfirmCourseAssignmentService(cuatrimestre_enrollment)
+        result = service.regenerate_monthly_tuition_if_missing()
+        if not result['success']:
+            return Response(
+                {
+                    'message': result['message'],
+                    'payments_created': result.get('payments_created') or [],
+                    'errors': result.get('errors') or [],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            {
+                'message': result['message'],
+                'payments_created': result['payments_created'],
+                'no_payments_reason': result.get('no_payments_reason'),
+            },
+            status=status.HTTP_200_OK,
+        )
     
     @action(detail=True, methods=['get'])
     def payment_voucher(self, request, pk=None):
@@ -1531,7 +1559,7 @@ class CourseEnrollmentViewSet(viewsets.ModelViewSet):
                         cuatrimestre_enrollment = CuatrimestreEnrollment.objects.filter(
                             student_id=student_id,
                             cuatrimestre=course.cuatrimestre,
-                            status__in=['INSCRITO', 'EN_CURSO']
+                            status='EN_CURSO',
                         ).order_by('-academic_year').first()
                         
                         if cuatrimestre_enrollment:

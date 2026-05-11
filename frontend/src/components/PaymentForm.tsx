@@ -97,6 +97,51 @@ const PaymentForm: React.FC = () => {
     }
   }, [error]);
 
+  const axiosErrorMessage = (e: unknown): string => {
+    const ax = e as {
+      response?: { data?: { error?: string; detail?: string } };
+    };
+    const d = ax.response?.data;
+    if (d && typeof d.error === 'string') return d.error;
+    if (d && typeof d.detail === 'string') return d.detail;
+    return 'No se pudo obtener el monto sugerido';
+  };
+
+  /**
+   * Monto desde catálogo o backend (PaymentConfiguration).
+   * @param showErrors si false, no muestra toast (p. ej. segundo intento tras find_oldest_unpaid).
+   */
+  const fetchSuggestedAmount = useCallback(
+    async (
+      studentId: string,
+      paymentTypeObj: PaymentType | null | undefined,
+      options?: { showErrors?: boolean },
+    ): Promise<string | null> => {
+      const showErrors = options?.showErrors !== false;
+      if (!paymentTypeObj) return null;
+      if (paymentTypeObj.code === '100') return '0.00';
+      if (paymentTypeObj.amount != null && String(paymentTypeObj.amount) !== '') {
+        const n = Number(paymentTypeObj.amount);
+        if (!Number.isNaN(n)) return n.toFixed(2);
+      }
+      if (!studentId) return null;
+      try {
+        const { data } = await paymentsApi.getPaymentAmount(studentId, paymentTypeObj.id);
+        if (data?.amount != null && String(data.amount) !== '') {
+          return Number(data.amount).toFixed(2);
+        }
+        if (showErrors && data && typeof (data as { detail?: string }).detail === 'string') {
+          error((data as { detail: string }).detail);
+        }
+      } catch (e) {
+        console.error('Error obteniendo monto sugerido:', e);
+        if (showErrors) error(axiosErrorMessage(e));
+      }
+      return null;
+    },
+    [error],
+  );
+
   useEffect(() => {
     loadStudents();
     loadPaymentTypes();
@@ -145,41 +190,30 @@ const PaymentForm: React.FC = () => {
   }, [studentSearch]);
 
   const handleStudentSelect = async (student: Student) => {
-    setPayment({ ...payment, student: student.id });
+    const existingTypeId = payment.payment_type;
     setStudentSearch(`${student.carnet} - ${student.first_name} ${student.last_name}`);
     setShowStudentDropdown(false);
-    setErrors({ ...errors, student: '' });
+    setErrors((prev) => ({ ...prev, student: '' }));
     setFoundPayment(null);
-    
-    // Si ya hay un tipo de pago seleccionado
-    if (payment.payment_type) {
-      const paymentType = paymentTypes.find(pt => pt.id === payment.payment_type);
-      
-      // Si es el pago 101, obtener el monto del backend
-      if (paymentType && paymentType.code === '101') {
-        try {
-          const response = await paymentsApi.getPaymentAmount(student.id, payment.payment_type);
-          const amountData = response.data;
-          setPayment(prev => ({
-            ...prev,
-            student: student.id,
-            amount: amountData.amount ? amountData.amount.toString() : prev.amount,
-          }));
-        } catch (err: any) {
-          console.error('Error obteniendo monto del pago:', err);
-          // Si hay error, continuar sin establecer el monto
-        }
-      }
-      
-      // Solo buscar pagos pendientes para colegiaturas mensuales (102, 103, 105)
-      // Estos son los únicos tipos de pago que pueden tener pagos pendientes preexistentes
+
+    if (existingTypeId) {
+      const paymentType = paymentTypes.find((pt) => pt.id === existingTypeId);
+      const suggested = await fetchSuggestedAmount(student.id, paymentType ?? null, { showErrors: true });
+      setPayment((prev) => ({
+        ...prev,
+        student: student.id,
+        amount: suggested !== null ? suggested : prev.amount,
+      }));
       if (paymentType && ['102', '103', '105'].includes(paymentType.code)) {
-        await searchOldestUnpaidPayment(student.id, payment.payment_type);
+        await searchOldestUnpaidPayment(student.id, existingTypeId, paymentType);
       }
+    } else {
+      setPayment((prev) => ({ ...prev, student: student.id }));
     }
   };
 
   const handlePaymentTypeChange = async (paymentTypeId: string) => {
+    setErrors((prev) => ({ ...prev, payment_type: '', amount: '' }));
     const paymentType = paymentTypes.find(pt => pt.id === paymentTypeId);
     setSelectedPaymentType(paymentType || null);
     
@@ -197,72 +231,166 @@ const PaymentForm: React.FC = () => {
       setFoundPayment(null); // No mostrar pago encontrado para pago gratis
       setReceiptFile(null); // Limpiar archivo de recibo
     } else {
-      setPayment({ ...payment, payment_type: paymentTypeId });
       setFoundPayment(null);
-      
-      // Si es el pago 101 y hay estudiante seleccionado, obtener el monto del backend
-      if (paymentType && paymentType.code === '101' && payment.student) {
-        try {
-          const response = await paymentsApi.getPaymentAmount(payment.student, paymentTypeId);
-          const amountData = response.data;
-          setPayment(prev => ({
-            ...prev,
-            amount: amountData.amount ? amountData.amount.toString() : prev.amount,
-          }));
-        } catch (err: any) {
-          console.error('Error obteniendo monto del pago:', err);
-          // Si hay error, no establecer el monto, el usuario lo puede ingresar manualmente
-        }
-      }
-      
+      const suggested = await fetchSuggestedAmount(payment.student, paymentType ?? null, { showErrors: true });
+      setPayment((prev) => ({
+        ...prev,
+        payment_type: paymentTypeId,
+        amount: suggested !== null ? suggested : prev.amount,
+      }));
+
       // Solo buscar pagos pendientes para colegiaturas mensuales (102, 103, 105)
-      // Estos son los únicos tipos de pago que pueden tener pagos pendientes preexistentes
       if (payment.student && paymentTypeId && paymentType && ['102', '103', '105'].includes(paymentType.code)) {
-        await searchOldestUnpaidPayment(payment.student, paymentTypeId);
+        await searchOldestUnpaidPayment(payment.student, paymentTypeId, paymentType);
       }
     }
-    setErrors({ ...errors, payment_type: '' });
   };
 
-  const searchOldestUnpaidPayment = async (studentId: string, paymentTypeId: string) => {
+  const searchOldestUnpaidPayment = async (
+    studentId: string,
+    paymentTypeId: string,
+    paymentTypeMeta?: PaymentType | null,
+  ) => {
     setSearchingPayment(true);
-    setErrors({ ...errors, payment_type: '' });
+    setErrors((prev) => ({ ...prev, payment_type: '' }));
+
+    const applyConfiguredAmountFallback = async () => {
+      const pt = paymentTypeMeta ?? paymentTypes.find((p) => p.id === paymentTypeId);
+      const configured = await fetchSuggestedAmount(studentId, pt ?? null, { showErrors: false });
+      if (configured !== null) {
+        setPayment((prev) => ({
+          ...prev,
+          amount: prev.amount && parseFloat(prev.amount) > 0 ? prev.amount : configured,
+        }));
+      }
+    };
+
+    const applyNotFoundMessage = (debugInfo: Record<string, unknown> | undefined, fallback: string) => {
+      let errorMsg = fallback;
+      if (debugInfo) {
+        console.log('Debug info:', debugInfo);
+        const total = Number(debugInfo.total_payments ?? 0);
+        const approved = Number(debugInfo.approved_payments ?? 0);
+        if (total === 0) {
+          const base =
+            'No hay cuotas de colegiatura en el módulo de pagos para este tipo (102/103/105). ' +
+            'Tener cursos matriculados en progreso académico no crea sola las cuotas: se generan al completar el flujo desde ' +
+            '«Inscripciones a cuatrimestres» → matrícula de cursos con el id de cuatrimestre (pre-asignar y confirmar). ';
+          const parts: string[] = [base];
+
+          if (debugInfo.course_enrollments_without_cuatrimestre !== undefined) {
+            parts.push(
+              `Matrículas con cuatrimestre: ${String(debugInfo.course_enrollments_with_cuatrimestre ?? '—')}. ` +
+                `Sin cuatrimestre: ${String(debugInfo.course_enrollments_without_cuatrimestre ?? '—')}. `,
+            );
+            if (Number(debugInfo.course_enrollments_without_cuatrimestre) > 0) {
+              parts.push(
+                'Hay cursos matriculados sin vínculo a inscripción al cuatrimestre; ese camino no genera el plan de colegiatura 102/103/105. ',
+              );
+            }
+          }
+
+          const cuats = debugInfo.cuatrimestre_enrollments as
+            | Array<{ status?: string; status_display?: string }>
+            | undefined;
+          if (Array.isArray(cuats) && cuats.length > 0) {
+            const pendingFlow = cuats.filter((c) =>
+              ['PENDIENTE_CONFIRMACION', 'CURSOS_PREASIGNADOS', 'PRE_INSCRIPCION'].includes(String(c?.status || '')),
+            );
+            if (pendingFlow.length > 0) {
+              parts.push(
+                `Inscripción(es) al cuatrimestre en estado que aún requiere matrícula/confirmación: ${pendingFlow
+                  .map((c) => c.status_display || c.status)
+                  .join(', ')}. `,
+              );
+            } else {
+              parts.push(
+                `Inscripciones al cuatrimestre registradas: ${cuats.length}. Estados: ${cuats
+                  .map((c) => c.status_display || c.status)
+                  .join(', ')}. `,
+              );
+            }
+          } else if (debugInfo.course_enrollments_without_cuatrimestre !== undefined) {
+            parts.push('No hay inscripciones al cuatrimestre en el sistema para este estudiante. ');
+          }
+
+          if (typeof debugInfo.tuition_payment_hint === 'string' && debugInfo.tuition_payment_hint.trim()) {
+            parts.push(debugInfo.tuition_payment_hint.trim());
+          }
+
+          errorMsg = parts.join('').trim();
+        } else if (approved === total) {
+          errorMsg = 'Todos los pagos de este tipo ya están aprobados.';
+        } else {
+          const pend =
+            debugInfo.pending_payments !== undefined
+              ? Number(debugInfo.pending_payments)
+              : Math.max(0, total - approved);
+          errorMsg = `No hay pagos pendientes. Total: ${total}, Aprobados: ${approved}, Pendientes: ${pend}`;
+        }
+      }
+      setErrors((prev) => ({ ...prev, payment_type: errorMsg }));
+    };
+
     try {
       const response = await findOldestUnpaidPayment(studentId, paymentTypeId);
-      const found = response.data;
-      setFoundPayment(found);
-      
-      // Actualizar el estado del pago con la información encontrada
-      setPayment(prev => ({
-        ...prev,
-        month: found.month || undefined,
-        year: found.year || undefined,
-        amount: found.final_amount ? found.final_amount.toString() : (found.amount ? found.amount.toString() : prev.amount),
-      }));
-    } catch (err: any) {
-      if (err.response?.status === 404) {
-        const debugInfo = err.response?.data?.debug_info;
-        let errorMsg = 'No se encontró ningún pago pendiente para este estudiante y tipo de pago';
-        
-        if (debugInfo) {
-          console.log('Debug info:', debugInfo);
-          if (debugInfo.total_payments === 0) {
-            errorMsg = 'No se han generado pagos para este estudiante. Primero debe confirmar la asignación de cursos.';
-          } else if (debugInfo.approved_payments === debugInfo.total_payments) {
-            errorMsg = 'Todos los pagos de este tipo ya están aprobados.';
-          } else {
-            errorMsg = `No hay pagos pendientes. Total: ${debugInfo.total_payments}, Aprobados: ${debugInfo.approved_payments}, Pendientes: ${debugInfo.pending_payments}`;
-          }
-        }
-        
-        setErrors({ ...errors, payment_type: errorMsg });
+      const data = response.data as Record<string, unknown>;
+
+      const wrapped = data.unpaid_payment !== undefined;
+      const found = wrapped
+        ? (data.unpaid_payment as Record<string, unknown> | null)
+        : data.id
+          ? (data as Record<string, unknown>)
+          : null;
+
+      if (found && found.id) {
+        setFoundPayment(found as any);
+        setPayment((prev) => ({
+          ...prev,
+          month: (found.month as number | undefined) || undefined,
+          year: (found.year as number | undefined) || undefined,
+          amount: found.final_amount
+            ? String(found.final_amount)
+            : found.amount
+              ? String(found.amount)
+              : prev.amount,
+        }));
+      } else {
         setFoundPayment(null);
-        // No mostrar toast de error aquí, solo establecer el error en el campo
+        const debugInfo = data.debug_info as Record<string, unknown> | undefined;
+        const msg =
+          typeof data.message === 'string'
+            ? data.message
+            : 'No se encontró ningún pago pendiente para este estudiante y tipo de pago';
+        applyNotFoundMessage(debugInfo, msg);
+        await applyConfiguredAmountFallback();
+      }
+    } catch (err: unknown) {
+      const ax = err as {
+        response?: { status?: number; data?: Record<string, unknown> };
+      };
+      if (ax.response?.status === 404) {
+        const body = ax.response.data || {};
+        const debugInfo = body.debug_info as Record<string, unknown> | undefined;
+        const d = body as { error?: string; detail?: string };
+        const errorMsg =
+          typeof d.error === 'string'
+            ? d.error
+            : typeof d.detail === 'string'
+              ? d.detail
+              : 'No se encontró ningún pago pendiente para este estudiante y tipo de pago';
+        applyNotFoundMessage(debugInfo, errorMsg);
+        setFoundPayment(null);
+        await applyConfiguredAmountFallback();
       } else {
         console.error('Error searching payment:', err);
-        const errorMsg = err.response?.data?.error || 'Error al buscar el pago pendiente';
-        setErrors({ ...errors, payment_type: errorMsg });
+        const errorMsg =
+          (ax.response?.data as { error?: string; detail?: string } | undefined)?.error ||
+          (ax.response?.data as { error?: string; detail?: string } | undefined)?.detail ||
+          'Error al buscar el pago pendiente';
+        setErrors((prev) => ({ ...prev, payment_type: typeof errorMsg === 'string' ? errorMsg : 'Error al buscar el pago pendiente' }));
         setFoundPayment(null);
+        await applyConfiguredAmountFallback();
       }
     } finally {
       setSearchingPayment(false);

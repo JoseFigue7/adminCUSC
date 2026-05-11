@@ -16,7 +16,7 @@ import io
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
-from weasyprint import HTML
+from config.weasyprint_lazy import get_html
 
 from students.models import Student
 from payments.models import Payment, Scholarship
@@ -1078,6 +1078,7 @@ class ReportsViewSet(viewsets.ViewSet):
             })
             
             # Generar PDF
+            HTML = get_html()
             html = HTML(string=html_content)
             pdf_file = html.write_pdf()
             

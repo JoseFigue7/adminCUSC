@@ -17,14 +17,14 @@ class PaymentTypePrimaryKeyField(serializers.Field):
             uuid_module.UUID(s)
             pt = PaymentType.objects.filter(id=s).first()
             if pt:
-                return pt.id
+                return pt
         except (ValueError, TypeError):
             pass
         # Intentar como código o "code - name" (ej. "100 - Inscripción al Cuatrimestre - Gratis")
         code = s.split(' - ')[0].strip() if ' - ' in s else s
         pt = PaymentType.objects.filter(code=code, is_active=True).first()
         if pt:
-            return pt.id
+            return pt
         raise serializers.ValidationError(
             f'Tipo de pago no encontrado para "{data}". Use el ID (UUID) o el código del tipo de pago.'
         )

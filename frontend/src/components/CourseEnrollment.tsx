@@ -6,7 +6,8 @@ import {
   getCourseEnrollments, 
   createCourseEnrollment,
   getCourses,
-  academicsApi
+  academicsApi,
+  axiosBlobErrorMessage,
 } from '../services/api';
 import { 
   FiBook, FiCheckCircle, FiXCircle, FiPlus, FiArrowLeft, 
@@ -289,8 +290,8 @@ const CourseEnrollment: React.FC = () => {
         const paymentsCreated = confirmResult?.data?.payments_created || [];
         const noPaymentsReason = confirmResult?.data?.no_payments_reason;
         
-        // Intentar descargar el talonario si no está exonerado
-        if (!res.data.is_enrollment_fee_exempt) {
+        // Talonario solo si hay pagos de colegiatura (102/103/105); si no, el API devuelve 400
+        if (!res.data.is_enrollment_fee_exempt && paymentsCreated.length > 0) {
           // Intentar obtener y descargar el talonario con reintentos
           let voucherSuccess = false;
           let lastError: any = null;
@@ -373,6 +374,11 @@ const CourseEnrollment: React.FC = () => {
           if (!voucherSuccess && lastError) {
             console.warn('No se pudo obtener el talonario después de 3 intentos:', lastError);
           }
+        } else if (!res.data.is_enrollment_fee_exempt && paymentsCreated.length === 0) {
+          warning(
+            confirmResult?.data?.message ||
+              'No se generaron pagos de colegiatura (revisar costos de cursos o tipos de pago 102/103/105). No hay talonario que descargar.'
+          );
         } else if (res.data.is_enrollment_fee_exempt) {
           success('Asignación confirmada. El estudiante está exonerado de pagos de colegiatura.');
           // Redirigir al perfil del estudiante
@@ -768,9 +774,12 @@ const CourseEnrollment: React.FC = () => {
                       document.body.removeChild(a);
                       window.URL.revokeObjectURL(url);
                       success('Talonario de pagos descargado exitosamente.');
-                    } catch (err: any) {
+                    } catch (err: unknown) {
                       console.error('Error downloading payment voucher:', err);
-                      const errorMsg = err.response?.data?.error || err.response?.data?.message || 'Error al descargar el talonario';
+                      const errorMsg = await axiosBlobErrorMessage(
+                        err,
+                        'Error al descargar el talonario'
+                      );
                       error(errorMsg);
                     }
                   }}

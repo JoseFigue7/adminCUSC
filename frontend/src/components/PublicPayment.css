@@ -205,6 +205,20 @@
   line-height: 1.6;
 }
 
+.public-payment-stripe-disabled {
+  margin-top: 1.25rem;
+  padding: 1rem 1.25rem;
+  background: #fff8e6;
+  border: 1px solid #f0d78c;
+  border-radius: 6px;
+  color: #5c4a00;
+  line-height: 1.5;
+}
+
+.public-payment-stripe-disabled p {
+  margin: 0;
+}
+
 @media (max-width: 768px) {
   .public-payment-card {
     padding: 1.5rem;

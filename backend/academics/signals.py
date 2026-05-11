@@ -4,8 +4,11 @@ Señales para rastrear cambios de estado en modelos académicos
 from django.db.models.signals import pre_save, post_save
 from django.dispatch import receiver
 from .models import (
-    CuatrimestreEnrollment, GraduationMethod,
-    CuatrimestreEnrollmentStatusHistory, GraduationMethodStatusHistory
+    CuatrimestreEnrollment,
+    CourseEnrollment,
+    GraduationMethod,
+    CuatrimestreEnrollmentStatusHistory,
+    GraduationMethodStatusHistory,
 )
 
 
@@ -53,6 +56,21 @@ def save_cuatrimestre_enrollment_status_history(sender, instance, created, **kwa
                 changed_by=getattr(instance, '_changed_by_user', None),
                 comment=getattr(instance, '_status_change_notes', '')
             )
+
+
+@receiver(post_save, sender=CourseEnrollment)
+def finalize_cuatrimestre_when_all_courses_graded(sender, instance, **kwargs):
+    """
+    Tras guardar una matrícula de curso, si el cuatrimestre está EN_CURSO y ya no quedan
+    cursos sin calificar, pasa la inscripción al cuatrimestre a FINALIZADO.
+    """
+    if kwargs.get('raw'):
+        return
+    if not instance.cuatrimestre_enrollment_id:
+        return
+    from .services import maybe_finalize_cuatrimestre_after_course_grade
+
+    maybe_finalize_cuatrimestre_after_course_grade(instance.cuatrimestre_enrollment_id)
 
 
 @receiver(pre_save, sender=GraduationMethod)

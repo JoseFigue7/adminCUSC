@@ -1,0 +1,7 @@
+# Nunca subas claves privadas al remoto. Esta carpeta queda casi vacía en Git.
+id_*
+*.pem
+known_hosts
+*.pub
+!INSTRUCCIONES.txt
+!.gitignore

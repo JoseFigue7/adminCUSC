@@ -488,7 +488,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         # Guardar el archivo
         filename = f"contrato_escaneado_{enrollment.student.carnet}_{enrollment.id}.{file_ext[1:]}"
         enrollment.contract_scanned.save(filename, file, save=False)
-        enrollment.contract_uploaded_at = datetime.now()
+        enrollment.contract_uploaded_at = timezone.now()
         enrollment.status = 'EN_REVISION'  # Cambiar estado a en revisión
         enrollment.save()
         

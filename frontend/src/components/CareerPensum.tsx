@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getCareerPensum, getCareers, getCourses } from '../services/api';
+import { getCareers, getCourses } from '../services/api';
 import { FiBook, FiArrowLeft, FiCheckCircle } from '../utils/icons';
 import './shared.css';
 import './CareerPensum.css';
@@ -45,15 +45,16 @@ const CareerPensum: React.FC = () => {
     try {
       const [careersRes, coursesRes] = await Promise.all([
         getCareers(),
-        getCourses(id!)
+        getCourses({ career: id }),
       ]);
 
       const careers = careersRes.data.results || careersRes.data;
       const selectedCareer = careers.find((c: Career) => c.id === id);
       setCareer(selectedCareer || null);
 
-      // Obtener todos los cursos de la carrera
-      const allCourses = coursesRes.data.results || coursesRes.data;
+      // Obtener todos los cursos de la carrera (filtrados por query ?career=)
+      const raw = coursesRes.data.results ?? coursesRes.data;
+      const allCourses = Array.isArray(raw) ? raw : [];
       
       // Organizar cursos por cuatrimestre
       const courses: Course[] = allCourses.map((course: any) => ({

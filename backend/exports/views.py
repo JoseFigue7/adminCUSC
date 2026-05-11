@@ -18,7 +18,7 @@ class ExportViewSet(viewsets.ViewSet):
     """
     ViewSet para exportar estudiantes a formato CSV para Moodle
     """
-    permission_classes = [IsAuthenticated, HasPermission('manage_students')]
+    permission_classes = [IsAuthenticated]
     
     def get_permissions(self):
         """Permisos específicos por acción"""
