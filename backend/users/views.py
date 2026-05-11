@@ -4,8 +4,16 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.contrib.auth import authenticate
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.utils.encoding import force_bytes, force_str
+from django.core.mail import send_mail
+from django.conf import settings
 from .models import User, Role
-from .serializers import UserSerializer, RegisterSerializer, UserProfileSerializer, RoleSerializer
+from .serializers import (
+    UserSerializer, RegisterSerializer, UserProfileSerializer, RoleSerializer,
+    PasswordResetRequestSerializer, PasswordResetConfirmSerializer
+)
 from .permissions import IsSuperAdmin, IsAdminOrSelf
 
 
@@ -87,6 +95,111 @@ class UserViewSet(viewsets.ModelViewSet):
         user.set_password(new_password)
         user.save()
         return Response({'message': 'Contraseña actualizada exitosamente'})
+    
+    @action(detail=False, methods=['post'], permission_classes=[permissions.AllowAny])
+    def request_password_reset(self, request):
+        """Solicitar recuperación de contraseña"""
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        if serializer.is_valid():
+            email = serializer.validated_data['email']
+            try:
+                user = User.objects.get(email=email)
+                # Generar token de recuperación
+                token = default_token_generator.make_token(user)
+                uid = urlsafe_base64_encode(force_bytes(user.pk))
+                
+                # Construir URL de reset (frontend)
+                frontend_url = settings.FRONTEND_URL
+                reset_url = f"{frontend_url}/reset-password?token={token}&uid={uid}"
+                
+                # Enviar email
+                subject = 'Recuperación de Contraseña - Colegio Santa Cecilia'
+                message = f"""
+Hola {user.get_full_name() or user.username},
+
+Has solicitado recuperar tu contraseña. Para restablecer tu contraseña, haz clic en el siguiente enlace:
+
+{reset_url}
+
+Este enlace expirará en 24 horas.
+
+Si no solicitaste este cambio, puedes ignorar este correo.
+
+Saludos,
+Colegio Santa Cecilia
+                """
+                
+                try:
+                    send_mail(
+                        subject,
+                        message,
+                        getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@admincusc.local'),
+                        [email],
+                        fail_silently=False,
+                    )
+                except Exception as e:
+                    # Log error pero no revelar si el email existe
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.error(f'Error al enviar email de recuperación: {str(e)}')
+                
+                # Siempre retornar éxito por seguridad (no revelar si el email existe)
+                return Response({
+                    'message': 'Si el email existe, recibirás un correo con las instrucciones para recuperar tu contraseña.'
+                }, status=status.HTTP_200_OK)
+            except User.DoesNotExist:
+                # Por seguridad, no revelamos si el email existe o no
+                return Response({
+                    'message': 'Si el email existe, recibirás un correo con las instrucciones para recuperar tu contraseña.'
+                }, status=status.HTTP_200_OK)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=False, methods=['post'], permission_classes=[permissions.AllowAny])
+    def confirm_password_reset(self, request):
+        """Confirmar y cambiar contraseña con token"""
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        if serializer.is_valid():
+            token = serializer.validated_data['token']
+            new_password = serializer.validated_data['new_password']
+            
+            # Extraer uid del token si está en el formato uid-token
+            # O recibirlo directamente del request
+            uid = request.data.get('uid')
+            
+            if not uid:
+                return Response(
+                    {'error': 'UID es requerido'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            try:
+                # Decodificar uid
+                user_id = force_str(urlsafe_base64_decode(uid))
+                user = User.objects.get(pk=user_id)
+                
+                # Verificar token
+                if not default_token_generator.check_token(user, token):
+                    return Response(
+                        {'error': 'Token inválido o expirado'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+                # Cambiar contraseña
+                user.set_password(new_password)
+                user.save()
+                
+                return Response({
+                    'message': 'Contraseña restablecida exitosamente'
+                }, status=status.HTTP_200_OK)
+                
+            except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+                return Response(
+                    {'error': 'Token inválido o expirado'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class RoleViewSet(viewsets.ReadOnlyModelViewSet):

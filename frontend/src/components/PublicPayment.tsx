@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { getStudentByCarnet, getPaymentTypes } from '../services/api';
-import StripePaymentForm from './StripePaymentForm';
 import './PublicPayment.css';
 
 interface Student {
@@ -30,15 +29,13 @@ interface PaymentType {
 }
 
 const PublicPayment: React.FC = () => {
-  const [step, setStep] = useState<'carnet' | 'payment' | 'success'>('carnet');
+  const [step, setStep] = useState<'carnet' | 'payment'>('carnet');
   const [carnet, setCarnet] = useState('');
   const [student, setStudent] = useState<Student | null>(null);
   const [paymentTypes, setPaymentTypes] = useState<PaymentType[]>([]);
   const [selectedPaymentType, setSelectedPaymentType] = useState<PaymentType | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState(false);
-  
   // Form fields
   const [amount, setAmount] = useState('');
   const [month, setMonth] = useState('');
@@ -131,16 +128,6 @@ const PublicPayment: React.FC = () => {
     return true;
   };
 
-  const handlePaymentSuccess = (data: any) => {
-    setSuccess(true);
-    setStep('success');
-    setError('');
-  };
-
-  const handlePaymentError = (errorMessage: string) => {
-    setError(errorMessage);
-  };
-
   const months = [
     { value: '1', label: 'Enero' },
     { value: '2', label: 'Febrero' },
@@ -162,7 +149,7 @@ const PublicPayment: React.FC = () => {
   return (
     <div className="public-payment-container">
       <div className="public-payment-card">
-        <h1>Pagos con Tarjeta de Crédito y Débito</h1>
+        <h1>Pagos en línea</h1>
 
         {step === 'carnet' && (
           <form onSubmit={handleCarnetSearch} className="payment-form">
@@ -309,18 +296,12 @@ const PublicPayment: React.FC = () => {
                   )}
 
                   {validateForm() && (
-                    <div className="stripe-payment-wrapper">
-                      <StripePaymentForm
-                        carnet={carnet}
-                        paymentTypeId={selectedPaymentType.id}
-                        amount={parseFloat(amount)}
-                        month={month ? parseInt(month) : undefined}
-                        year={year ? parseInt(year) : undefined}
-                        semester={semester ? parseInt(semester) : undefined}
-                        quantity={quantity ? parseInt(quantity) : undefined}
-                        onSuccess={handlePaymentSuccess}
-                        onError={handlePaymentError}
-                      />
+                    <div className="public-payment-stripe-disabled" role="status">
+                      <p>
+                        El pago con tarjeta por esta página está <strong>desactivado</strong> por ahora.
+                        Para realizar tu pago, usa los canales que indique la institución (transferencia,
+                        ventanilla u otros).
+                      </p>
                     </div>
                   )}
 
@@ -351,31 +332,6 @@ const PublicPayment: React.FC = () => {
           </div>
         )}
 
-        {step === 'success' && (
-          <div className="success-message">
-            <div className="success-icon">✓</div>
-            <h2>¡Pago Procesado Exitosamente!</h2>
-            <p>Su pago ha sido procesado correctamente. Recibirá un comprobante por correo electrónico.</p>
-            <button
-              className="btn btn-primary"
-              onClick={() => {
-                setStep('carnet');
-                setCarnet('');
-                setStudent(null);
-                setSelectedPaymentType(null);
-                setError('');
-                setSuccess(false);
-                setAmount('');
-                setMonth('');
-                setYear('');
-                setSemester('');
-                setQuantity('');
-              }}
-            >
-              Realizar Otro Pago
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );

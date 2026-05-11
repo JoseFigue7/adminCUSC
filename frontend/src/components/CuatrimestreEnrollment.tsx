@@ -235,6 +235,25 @@ const CuatrimestreEnrollment: React.FC = () => {
     }
   };
 
+  const handleRegenerateTuition = async (enrollmentId: string) => {
+    if (
+      !window.confirm(
+        '¿Generar cuotas de colegiatura (102/103/105) solo si esta inscripción no tiene ninguna? Úselo cuando la inscripción ya está «En curso» pero en Pagos no aparecen cuotas (p. ej. el monto del catálogo estaba en 0 al confirmar).',
+      )
+    ) {
+      return;
+    }
+    try {
+      const res = await academicsApi.regenerateTuitionPayments(enrollmentId);
+      success(res.data?.message || 'Cuotas generadas');
+      await loadData();
+    } catch (err: any) {
+      console.error('Error regenerating tuition:', err);
+      const d = err.response?.data;
+      error(d?.message || d?.error || 'No se pudo generar el plan de colegiatura');
+    }
+  };
+
   if (loading) {
     return (
       <div className="page-container">
@@ -452,12 +471,22 @@ const CuatrimestreEnrollment: React.FC = () => {
                       </>
                     )}
                     {enrollment.status === 'EN_CURSO' && (
-                      <button
-                        onClick={() => handleViewCourses(enrollment.id)}
-                        className="btn btn-primary btn-sm"
-                      >
-                        <FiCheckCircle /> Ver Cursos
-                      </button>
+                      <>
+                        <button
+                          onClick={() => handleViewCourses(enrollment.id)}
+                          className="btn btn-primary btn-sm"
+                        >
+                          <FiCheckCircle /> Ver Cursos
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRegenerateTuition(enrollment.id)}
+                          className="btn btn-secondary btn-sm"
+                          title="Si no hay cuotas en Pagos pero la inscripción ya está en curso"
+                        >
+                          Generar cuotas (si faltan)
+                        </button>
+                      </>
                     )}
                     {(enrollment.status === 'FINALIZADO' || enrollment.status === 'CANCELADO') && (
                       <button

@@ -16,7 +16,9 @@ from academics.models import (
     CourseEnrollment, GraduationMethod, CuatrimestreEnrollment,
     CuatrimestreEnrollmentStatusHistory, GraduationMethodStatusHistory
 )
-from payments.models import Payment, Scholarship, PaymentStatusHistory
+from payments.models import Payment, Scholarship
+# TODO: Descomentar cuando se cree el modelo PaymentStatusHistory
+# from payments.models import PaymentStatusHistory
 from users.models import User
 
 
@@ -53,7 +55,9 @@ class Command(BaseCommand):
             self.stdout.write('Eliminando historiales de estado...')
             counts['enrollment_status_history'] = EnrollmentStatusHistory.objects.all().delete()[0]
             counts['student_document_status_history'] = StudentDocumentStatusHistory.objects.all().delete()[0]
-            counts['payment_status_history'] = PaymentStatusHistory.objects.all().delete()[0]
+            # TODO: Descomentar cuando se cree el modelo PaymentStatusHistory
+            # counts['payment_status_history'] = PaymentStatusHistory.objects.all().delete()[0]
+            counts['payment_status_history'] = 0
             counts['cuatrimestre_enrollment_status_history'] = CuatrimestreEnrollmentStatusHistory.objects.all().delete()[0]
             counts['graduation_method_status_history'] = GraduationMethodStatusHistory.objects.all().delete()[0]
 

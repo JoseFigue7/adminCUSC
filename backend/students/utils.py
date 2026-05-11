@@ -1,6 +1,6 @@
 from django.template.loader import render_to_string
 from django.http import HttpResponse
-from weasyprint import HTML
+from config.weasyprint_lazy import get_html
 import io
 import os
 from pathlib import Path
@@ -158,7 +158,7 @@ def generate_contract(student, enrollment):
                 # Crear la sección de firmas mejorada
                 signature_section = f'''<br><br><div class="signature-section">
     <div class="signature-box">
-        <p style="margin-bottom: 10px; font-weight: bold; text-align: center;">Firma de Centro de Capacitación<br>Santa Cecilia S.C.</p>
+        <p style="margin-bottom: 10px; font-weight: bold; text-align: center;">Firma de Colegio Santa Cecilia</p>
         <div class="signature-line">
             <p style="margin: 0; font-size: 10px; text-align: center;">Lic. Gustavo Adolfo Argeta Mendez</p>
         </div>
@@ -239,6 +239,7 @@ def generate_contract(student, enrollment):
 </html>"""
         
         # Generar PDF
+        HTML = get_html()
         html = HTML(string=html_string)
         pdf_file = io.BytesIO()
         html.write_pdf(pdf_file)

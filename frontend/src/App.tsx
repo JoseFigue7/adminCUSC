@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
-import { FiHome, FiUsers, FiDollarSign, FiBook, FiAward, FiLogOut, FiUser, FiDownload } from './utils/icons';
+import { FiHome, FiUsers, FiDollarSign, FiBook, FiAward, FiLogOut, FiUser, FiDownload, FiTrendingUp, FiFileText } from './utils/icons';
 import Dashboard from './components/Dashboard';
 import StudentList from './components/StudentList';
 import StudentForm from './components/StudentForm';
@@ -18,8 +18,13 @@ import GraduationMethodManagement from './components/GraduationMethodManagement'
 import GradeUpload from './components/GradeUpload';
 import ScholarshipManagement from './components/ScholarshipManagement';
 import ExportStudents from './components/ExportStudents';
+import ReportsIndex from './components/ReportsIndex';
+import PaymentsDetailedReport from './components/PaymentsDetailedReport';
+import ExecutiveReport from './components/ExecutiveReport';
 import Login from './components/Login';
 import Register from './components/Register';
+import ForgotPassword from './components/ForgotPassword';
+import ResetPassword from './components/ResetPassword';
 import UserProfile from './components/UserProfile';
 import StudentAccounting from './components/StudentAccounting';
 import PublicPayment from './components/PublicPayment';
@@ -59,6 +64,9 @@ const Navigation: React.FC = () => {
       </Link>
       <Link to="/exports" className={isActive('/exports') ? 'active' : ''}>
         <FiDownload /> Exportación
+      </Link>
+      <Link to="/reports" className={isActive('/reports') ? 'active' : ''}>
+        <FiFileText /> Reportes
       </Link>
     </nav>
   );
@@ -156,6 +164,8 @@ function AppContent() {
           <Routes>
             <Route path="/login" element={isAuthenticated ? <Navigate to="/" replace /> : <Login />} />
             <Route path="/register" element={isAuthenticated ? <Navigate to="/" replace /> : <Register />} />
+            <Route path="/forgot-password" element={isAuthenticated ? <Navigate to="/" replace /> : <ForgotPassword />} />
+            <Route path="/reset-password" element={isAuthenticated ? <Navigate to="/" replace /> : <ResetPassword />} />
             <Route path="/profile" element={<ProtectedRoute><UserProfile /></ProtectedRoute>} />
             <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/students" element={<ProtectedRoute requirePermission="manage_students"><StudentList /></ProtectedRoute>} />
@@ -177,6 +187,9 @@ function AppContent() {
             <Route path="/graduation-method" element={<ProtectedRoute requirePermission="manage_thesis"><GraduationMethodManagement /></ProtectedRoute>} />
             <Route path="/scholarships" element={<ProtectedRoute requirePermission="manage_scholarships"><ScholarshipManagement /></ProtectedRoute>} />
             <Route path="/exports" element={<ProtectedRoute requirePermission="manage_students"><ExportStudents /></ProtectedRoute>} />
+            <Route path="/reports" element={<ProtectedRoute requirePermission="view_reports"><ReportsIndex /></ProtectedRoute>} />
+            <Route path="/reports/payments-detailed" element={<ProtectedRoute requirePermission="view_reports"><PaymentsDetailedReport /></ProtectedRoute>} />
+            <Route path="/reports/executive" element={<ProtectedRoute requirePermission="view_reports"><ExecutiveReport /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </AppLayout>

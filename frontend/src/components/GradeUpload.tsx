@@ -3,7 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { 
   academicsApi,
   getCareers,
-  getStudent
+  getStudent,
+  getStudentByCarnet
 } from '../services/api';
 import { 
   FiUpload, FiFileText, FiCheckCircle, FiXCircle, FiDownload,
@@ -47,6 +48,7 @@ interface CourseEnrollment {
   id: string;
   student: string;
   student_name: string;
+  student_carnet?: string;
   course: string;
   course_id: string;
   course_name: string;
@@ -82,6 +84,14 @@ const GradeUpload: React.FC = () => {
   
   const [grades, setGrades] = useState<Map<string, number>>(new Map());
   const [uploadResults, setUploadResults] = useState<any>(null);
+  
+  // Estado para previsualización de CSV
+  const [csvPreview, setCsvPreview] = useState<{
+    grades: any[];
+    errors: string[];
+    fileName: string;
+  } | null>(null);
+  const [showPreview, setShowPreview] = useState(false);
 
   useEffect(() => {
     loadCareers();
@@ -196,7 +206,7 @@ const GradeUpload: React.FC = () => {
 
     setUploading(true);
     try {
-      const gradesArray: GradeItem[] = [];
+      const gradesArray: any[] = [];
       
       grades.forEach((finalGrade, key) => {
         const [studentId, courseId] = key.split('-');
@@ -204,133 +214,344 @@ const GradeUpload: React.FC = () => {
           e => e.student === studentId && e.course_id === courseId
         );
         
-        if (enrollment) {
-          gradesArray.push({
-            student_id: studentId,
-            course_id: courseId,
-            final_grade: finalGrade,
-            student_name: enrollment.student_name,
-            course_name: enrollment.course_name,
-            course_code: enrollment.course_code
-          });
+        if (!enrollment) {
+          return; // Saltar si no hay enrollment
         }
+        
+        // Solo enviar los campos que el backend espera
+        // Asegurarse de que final_grade sea un número
+        const gradeValue = typeof finalGrade === 'number' ? finalGrade : parseFloat(String(finalGrade));
+        
+        if (isNaN(gradeValue) || gradeValue < 0 || gradeValue > 100) {
+          console.warn(`Nota inválida para estudiante ${studentId}, curso ${courseId}: ${finalGrade}`);
+          return; // Saltar si la nota es inválida
+        }
+        
+        gradesArray.push({
+          student_id: studentId,
+          course_id: courseId,
+          final_grade: gradeValue
+        });
       });
 
+      if (gradesArray.length === 0) {
+        error('No se encontraron matrículas válidas para las notas ingresadas');
+        setUploading(false);
+        return;
+      }
+
+      console.log('Enviando notas:', gradesArray);
       const response = await academicsApi.bulkUploadGrades(gradesArray);
       setUploadResults(response.data);
       
       success(`Notas subidas: ${response.data.results.updated} actualizadas, ${response.data.results.created} creadas`);
+      
+      // Limpiar el mapa de notas después de subir
+      setGrades(new Map());
       
       // Recargar matrículas para ver los cambios
       await loadEnrollments();
       
     } catch (err: any) {
       console.error('Error uploading grades:', err);
-      const errorMessage = err.response?.data?.detail || err.response?.data?.message || 'Error al subir notas';
+      const errorMessage = err.response?.data?.detail || err.response?.data?.message || err.response?.data?.error || 'Error al subir notas';
       error(errorMessage);
     } finally {
       setUploading(false);
     }
   };
 
+  const enrichPreviewData = async (gradesArray: any[]) => {
+    // Enriquecer datos con información de estudiantes y cursos cuando sea posible
+    const enrichedGrades = await Promise.all(
+      gradesArray.map(async (grade) => {
+        const enriched: any = { ...grade };
+        
+        // Si tenemos carnet, intentar obtener información del estudiante
+        if (grade.student_carnet) {
+          try {
+            const studentRes = await getStudentByCarnet(grade.student_carnet);
+            if (studentRes.data) {
+              enriched.student_name = studentRes.data.first_name + ' ' + (studentRes.data.first_last_name || '');
+              enriched.student_carnet_display = studentRes.data.carnet;
+            }
+          } catch (err) {
+            // Si no se encuentra, mantener el identificador original
+            enriched.student_name = 'No encontrado';
+          }
+        }
+        
+        // Si tenemos código de curso, intentar obtener información del curso
+        if (grade.course_code) {
+          try {
+            const coursesRes = await academicsApi.getCourses({ code: grade.course_code });
+            const courses = coursesRes.data.results || coursesRes.data;
+            if (courses && courses.length > 0) {
+              enriched.course_name = courses[0].name;
+              enriched.course_code_display = courses[0].code;
+            }
+          } catch (err) {
+            // Si no se encuentra, mantener el código original
+            enriched.course_name = 'No encontrado';
+          }
+        }
+        
+        return enriched;
+      })
+    );
+    
+    return enrichedGrades;
+  };
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    setLoading(true);
+    
     // Leer el archivo CSV
     const text = await file.text();
     const lines = text.split('\n').filter(line => line.trim());
     
-    // Asumir que la primera línea es el encabezado
-    // Formato esperado: student_id,course_id,final_grade o carnet,course_code,final_grade
-    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-    const isCarnetFormat = headers.includes('carnet') || headers.includes('carné');
+    if (lines.length < 2) {
+      error('El archivo CSV debe tener al menos una línea de encabezado y una línea de datos');
+      return;
+    }
     
-    const gradesArray: GradeItem[] = [];
+    // Asumir que la primera línea es el encabezado
+    const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, '').toLowerCase());
+    
+    // Obtener índices de columnas con múltiples variantes
+    const getIndex = (possibleNames: string[]) => {
+      for (const name of possibleNames) {
+        const idx = headers.findIndex(h => h === name.toLowerCase() || h.includes(name.toLowerCase()));
+        if (idx !== -1) return idx;
+      }
+      return -1;
+    };
+    
+    // Detectar formato Moodle 4.2
+    const moodleIdIdx = getIndex(['id', 'student id', 'username', 'identificación', 'identificacion']);
+    const moodleNameIdx = getIndex(['nombre completo', 'full name', 'firstname', 'nombre', 'apellido', 'lastname']);
+    const moodleEmailIdx = getIndex(['email', 'correo', 'e-mail']);
+    const moodleCourseNameIdx = getIndex(['nombre del curso', 'course name', 'curso', 'course']);
+    const moodleCourseCodeIdx = getIndex(['código del curso', 'codigo del curso', 'course code', 'código', 'codigo']);
+    
+    // Detectar otros formatos
+    const hasCarnet = getIndex(['student_carnet', 'carnet', 'carné']) !== -1;
+    const hasCourseCode = getIndex(['course_code', 'codigo_curso', 'código_curso']) !== -1;
+    const hasCareerCode = getIndex(['career_code', 'codigo_carrera', 'código_carrera']) !== -1;
+    const hasCuatrimestre = getIndex(['cuatrimestre_number', 'cuatrimestre', 'cuatrimestre_numero']) !== -1;
+    const hasAcademicYear = getIndex(['academic_year', 'año', 'ano', 'year']) !== -1;
+    const hasStudentId = getIndex(['student_id']) !== -1;
+    const hasCourseId = getIndex(['course_id']) !== -1;
+    
+    // Detectar formato de calificación
+    const finalGradeIdx = getIndex(['calificación', 'calificacion', 'final_grade', 'nota', 'nota_final', 'grade', 'score', 'puntuación', 'puntuacion']);
+    
+    if (finalGradeIdx === -1) {
+      error('No se encontró la columna de calificación. Busque columnas como: "Calificación", "Final grade", "Nota", "Grade"');
+      return;
+    }
+    
+    // Determinar formato
+    // Moodle 4.2 típicamente tiene: ID/Username, Nombre completo, Email, Nombre del curso, Código del curso, Calificación
+    const isMoodleFormat = moodleCourseCodeIdx !== -1 && (moodleIdIdx !== -1 || moodleNameIdx !== -1);
+    const isCarnetFormat = hasCarnet && hasCourseCode;
+    const isIdFormat = hasStudentId && hasCourseId;
+    
+    if (!isMoodleFormat && !isCarnetFormat && !isIdFormat) {
+      error('Formato CSV no reconocido. Debe incluir columnas para identificar estudiante y curso. Use el ejemplo CSV como referencia.');
+      return;
+    }
+    
+    const gradesArray: any[] = [];
     const errors: string[] = [];
     
+    // Obtener índices según el formato detectado
+    let carnetIdx = -1;
+    let courseCodeIdx = -1;
+    
+    if (isMoodleFormat) {
+      // En formato Moodle, preferir ID si está disponible, sino usar nombre completo
+      carnetIdx = moodleIdIdx !== -1 ? moodleIdIdx : moodleNameIdx;
+      courseCodeIdx = moodleCourseCodeIdx;
+    } else if (isCarnetFormat) {
+      carnetIdx = getIndex(['student_carnet', 'carnet', 'carné']);
+      courseCodeIdx = getIndex(['course_code', 'codigo_curso', 'código_curso']);
+    }
+    
+    const careerCodeIdx = getIndex(['career_code', 'codigo_carrera', 'código_carrera']);
+    const cuatrimestreIdx = getIndex(['cuatrimestre_number', 'cuatrimestre', 'cuatrimestre_numero']);
+    const academicYearIdx = getIndex(['academic_year', 'año', 'ano', 'year']);
+    const studentIdIdx = getIndex(['student_id']);
+    const courseIdIdx = getIndex(['course_id']);
+    
     for (let i = 1; i < lines.length; i++) {
-      const values = lines[i].split(',').map(v => v.trim());
+      const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
       
       if (values.length < 3) continue;
       
       try {
-        let studentId: string;
-        let courseId: string;
-        const finalGrade = parseFloat(values[2]);
+        const finalGrade = parseFloat(values[finalGradeIdx]);
         
         if (isNaN(finalGrade) || finalGrade < 0 || finalGrade > 100) {
-          errors.push(`Línea ${i + 1}: Nota inválida (${values[2]})`);
+          errors.push(`Línea ${i + 1}: Nota inválida (${values[finalGradeIdx]})`);
           continue;
         }
         
-        if (isCarnetFormat) {
-          // Buscar estudiante por carnet
-          // Buscar curso por código
-          // Por ahora, mostrar error
-          errors.push(`Línea ${i + 1}: Formato con carnet no implementado aún. Use student_id y course_id.`);
-          continue;
+        if (isMoodleFormat || isCarnetFormat) {
+          // Formato Moodle o con carnet
+          const identifier = isMoodleFormat 
+            ? (values[carnetIdx]?.trim() || values[moodleNameIdx]?.trim() || '')
+            : values[carnetIdx]?.trim();
+          const courseCode = values[courseCodeIdx]?.trim();
+          
+          if (!identifier || !courseCode) {
+            errors.push(`Línea ${i + 1}: Faltan datos (identificador de estudiante o código de curso)`);
+            continue;
+          }
+          
+          const gradeItem: any = {
+            student_carnet: identifier, // En Moodle puede ser ID, username o carnet
+            course_code: courseCode,
+            final_grade: finalGrade
+          };
+          
+          // Agregar campos opcionales si están presentes
+          if (careerCodeIdx !== -1 && values[careerCodeIdx]) {
+            gradeItem.career_code = parseInt(values[careerCodeIdx]);
+          }
+          if (cuatrimestreIdx !== -1 && values[cuatrimestreIdx]) {
+            gradeItem.cuatrimestre_number = parseInt(values[cuatrimestreIdx]);
+          }
+          if (academicYearIdx !== -1 && values[academicYearIdx]) {
+            gradeItem.academic_year = parseInt(values[academicYearIdx]);
+          } else if (selectedCareer && selectedCuatrimestre) {
+            // Usar los valores seleccionados si no están en el CSV
+            gradeItem.academic_year = academicYear;
+            const career = careers.find(c => c.id === selectedCareer);
+            if (career) {
+              gradeItem.career_code = career.code;
+            }
+            const cuatrimestre = cuatrimestres.find(c => c.id === selectedCuatrimestre);
+            if (cuatrimestre) {
+              gradeItem.cuatrimestre_number = cuatrimestre.number;
+            }
+          }
+          
+          gradesArray.push(gradeItem);
         } else {
-          studentId = values[0];
-          courseId = values[1];
+          // Formato con IDs
+          const studentId = values[studentIdIdx]?.trim();
+          const courseId = values[courseIdIdx]?.trim();
+          
+          if (!studentId || !courseId) {
+            errors.push(`Línea ${i + 1}: Faltan datos (student_id o course_id)`);
+            continue;
+          }
+          
+          gradesArray.push({
+            student_id: studentId,
+            course_id: courseId,
+            final_grade: finalGrade
+          });
         }
-        
-        gradesArray.push({
-          student_id: studentId,
-          course_id: courseId,
-          final_grade: finalGrade
-        });
       } catch (err) {
-        errors.push(`Línea ${i + 1}: Error al procesar`);
+        errors.push(`Línea ${i + 1}: Error al procesar - ${err}`);
       }
     }
     
     if (errors.length > 0) {
-      error(`Errores en el archivo: ${errors.slice(0, 5).join(', ')}${errors.length > 5 ? '...' : ''}`);
+      error(`Errores en el archivo (${errors.length}): ${errors.slice(0, 5).join(', ')}${errors.length > 5 ? '...' : ''}`);
     }
     
     if (gradesArray.length > 0) {
-      setUploading(true);
       try {
-        const response = await academicsApi.bulkUploadGrades(gradesArray);
-        setUploadResults(response.data);
-        success(`Notas subidas: ${response.data.results.updated} actualizadas, ${response.data.results.created} creadas`);
-        await loadEnrollments();
-      } catch (err: any) {
-        const errorMessage = err.response?.data?.detail || err.response?.data?.message || 'Error al subir notas';
-        error(errorMessage);
-      } finally {
-        setUploading(false);
+        // Enriquecer datos con información de estudiantes y cursos
+        const enrichedGrades = await enrichPreviewData(gradesArray);
+        
+        // Mostrar previsualización en lugar de subir inmediatamente
+        setCsvPreview({
+          grades: enrichedGrades,
+          errors: errors,
+          fileName: file.name
+        });
+        setShowPreview(true);
+        
+        if (errors.length > 0) {
+          error(`Se encontraron ${errors.length} errores en el archivo. Revise la previsualización.`);
+        } else {
+          success(`CSV procesado correctamente. Se importarán ${gradesArray.length} notas. Revise la previsualización antes de confirmar.`);
+        }
+      } catch (err) {
+        console.error('Error enriqueciendo datos:', err);
+        // Mostrar previsualización básica si falla el enriquecimiento
+        setCsvPreview({
+          grades: gradesArray,
+          errors: errors,
+          fileName: file.name
+        });
+        setShowPreview(true);
+        success(`CSV procesado. Se importarán ${gradesArray.length} notas. Revise la previsualización antes de confirmar.`);
       }
+    } else {
+      error('No se pudieron procesar notas del archivo CSV. Verifique el formato.');
     }
+    
+    setLoading(false);
+    
+    // Limpiar el input para permitir subir el mismo archivo de nuevo
+    event.target.value = '';
   };
 
-  const exportToCSV = () => {
-    if (enrollments.length === 0) {
-      error('No hay datos para exportar');
+  const handleConfirmImport = async () => {
+    if (!csvPreview || csvPreview.grades.length === 0) {
+      error('No hay notas para importar');
       return;
     }
 
-    const headers = ['student_id', 'student_name', 'student_carnet', 'course_id', 'course_code', 'course_name', 'final_grade', 'status'];
-    const rows = enrollments.map(e => [
-      e.student,
-      e.student_name || '',
-      '', // carnet - necesitaríamos cargarlo
-      e.course_id,
-      e.course_code || '',
-      e.course_name || '',
-      e.final_grade?.toString() || '',
-      e.status || ''
-    ]);
+    setUploading(true);
+    try {
+      const response = await academicsApi.bulkUploadGrades(csvPreview.grades);
+      setUploadResults(response.data);
+      success(`Notas importadas: ${response.data.results.updated} actualizadas, ${response.data.results.created} creadas`);
+      await loadEnrollments();
+      // Limpiar previsualización
+      setCsvPreview(null);
+      setShowPreview(false);
+    } catch (err: any) {
+      const errorMessage = err.response?.data?.detail || err.response?.data?.message || 'Error al importar notas';
+      error(errorMessage);
+    } finally {
+      setUploading(false);
+    }
+  };
 
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
+  const handleCancelImport = () => {
+    setCsvPreview(null);
+    setShowPreview(false);
+  };
+
+  const downloadExampleCSV = () => {
+    // Formato compatible con Moodle 4.2 - exportación de notas
+    // Moodle exporta con columnas: Nombre completo, Email, ID, Nombre del curso, Código del curso, Calificación
+    const headers = ['Nombre completo', 'Email', 'ID', 'Nombre del curso', 'Código del curso', 'Calificación'];
+    const exampleRows = [
+      ['Juan Pérez García', 'juan.perez@example.com', '101240001', 'Matemáticas I', 'MAT101', '85.5'],
+      ['María López Sánchez', 'maria.lopez@example.com', '101240002', 'Matemáticas I', 'MAT101', '92.0'],
+      ['Carlos Ramírez Torres', 'carlos.ramirez@example.com', '101240003', 'Matemáticas I', 'MAT101', '78.5']
+    ];
+    
+    const csv = [headers.join(','), ...exampleRows.map(r => r.map(cell => `"${cell}"`).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `notas_${selectedCareer}_${academicYear}.csv`;
+    a.download = `ejemplo_notas_moodle_4.2.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
+    success('Ejemplo CSV descargado (formato Moodle 4.2)');
   };
 
   // Agrupar enrollments por estudiante y curso
@@ -418,17 +639,18 @@ const GradeUpload: React.FC = () => {
         </button>
       </div>
 
-      {enrollmentsList.length > 0 && (
+      {/* Sección de edición manual (opcional) - Solo se muestra si hay matrículas cargadas */}
+      {enrollmentsList.length > 0 && !showPreview && (
         <div className="actions-bar">
-          <button onClick={exportToCSV} className="btn btn-secondary">
-            <FiDownload /> Exportar CSV
-          </button>
+          <p style={{ fontSize: '0.9rem', color: '#666', margin: '0.5rem 0' }}>
+            <strong>Nota:</strong> También puede editar notas manualmente en la tabla de abajo, o subir un CSV masivamente usando el botón de abajo.
+          </p>
           <button
             onClick={handleBulkUpload}
             className="btn btn-primary"
             disabled={uploading || grades.size === 0}
           >
-            <FiUpload /> {uploading ? 'Subiendo...' : `Subir ${grades.size} Nota(s)`}
+            <FiUpload /> {uploading ? 'Subiendo...' : `Subir ${grades.size} Nota(s) Manualmente`}
           </button>
         </div>
       )}
@@ -522,15 +744,205 @@ const GradeUpload: React.FC = () => {
         </div>
       )}
 
-      <div className="file-upload-section">
-        <h3>O subir desde archivo CSV</h3>
-        <p>Formato: student_id,course_id,final_grade</p>
-        <input
-          type="file"
-          accept=".csv"
-          onChange={handleFileUpload}
-          className="file-input"
-        />
+      {/* Previsualización de CSV */}
+      {showPreview && csvPreview && (
+        <div className="csv-preview-section" style={{ 
+          marginTop: '2rem', 
+          padding: '1.5rem', 
+          border: '2px solid #007bff', 
+          borderRadius: '8px',
+          backgroundColor: '#f8f9fa'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h3 style={{ margin: 0 }}>
+              <FiFileText /> Previsualización de Importación
+            </h3>
+            <span style={{ fontSize: '0.9rem', color: '#666' }}>
+              Archivo: {csvPreview.fileName}
+            </span>
+          </div>
+          
+          <div style={{ marginBottom: '1rem' }}>
+            <p style={{ margin: '0.5rem 0' }}>
+              <strong>Total de notas a importar:</strong> {csvPreview.grades.length}
+            </p>
+            {csvPreview.errors.length > 0 && (
+              <div style={{ 
+                padding: '0.75rem', 
+                backgroundColor: '#fff3cd', 
+                border: '1px solid #ffc107', 
+                borderRadius: '4px',
+                marginTop: '0.5rem'
+              }}>
+                <strong>Advertencias ({csvPreview.errors.length}):</strong>
+                <ul style={{ margin: '0.5rem 0 0 1.5rem', padding: 0 }}>
+                  {csvPreview.errors.slice(0, 5).map((err, idx) => (
+                    <li key={idx} style={{ fontSize: '0.9rem' }}>{err}</li>
+                  ))}
+                  {csvPreview.errors.length > 5 && (
+                    <li style={{ fontSize: '0.9rem' }}>... y {csvPreview.errors.length - 5} más</li>
+                  )}
+                </ul>
+              </div>
+            )}
+          </div>
+
+          <div style={{ 
+            maxHeight: '400px', 
+            overflowY: 'auto', 
+            border: '1px solid #dee2e6', 
+            borderRadius: '4px',
+            marginBottom: '1rem'
+          }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead style={{ backgroundColor: '#e9ecef', position: 'sticky', top: 0 }}>
+                <tr>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>
+                    Estudiante
+                  </th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>
+                    Carnet/ID
+                  </th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>
+                    Curso
+                  </th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #dee2e6' }}>
+                    Código
+                  </th>
+                  <th style={{ padding: '0.75rem', textAlign: 'center', borderBottom: '2px solid #dee2e6' }}>
+                    Nota
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {csvPreview.grades.map((grade, idx) => (
+                  <tr key={idx} style={{ borderBottom: '1px solid #dee2e6' }}>
+                    <td style={{ padding: '0.75rem' }}>
+                      {grade.student_name || 'No encontrado'}
+                    </td>
+                    <td style={{ padding: '0.75rem', fontFamily: 'monospace' }}>
+                      {grade.student_carnet_display || grade.student_carnet || grade.student_id || 'N/A'}
+                    </td>
+                    <td style={{ padding: '0.75rem' }}>
+                      {grade.course_name || 'No encontrado'}
+                    </td>
+                    <td style={{ padding: '0.75rem', fontFamily: 'monospace' }}>
+                      {grade.course_code_display || grade.course_code || grade.course_id || 'N/A'}
+                    </td>
+                    <td style={{ padding: '0.75rem', textAlign: 'center', fontWeight: 'bold', fontSize: '1.1em' }}>
+                      {grade.final_grade}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+            <button
+              onClick={handleCancelImport}
+              className="btn btn-secondary"
+              disabled={uploading}
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleConfirmImport}
+              className="btn btn-primary"
+              disabled={uploading || csvPreview.grades.length === 0}
+            >
+              <FiUpload /> {uploading ? 'Importando...' : `Confirmar e Importar ${csvPreview.grades.length} Nota(s)`}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="file-upload-section" style={{ marginTop: '2rem', padding: '1.5rem', backgroundColor: '#f8f9fa', borderRadius: '8px' }}>
+        <h3 style={{ marginTop: 0 }}>
+          <FiUpload /> Subir Notas Masivamente desde CSV (Moodle)
+        </h3>
+        <div style={{ marginBottom: '1rem' }}>
+          <p style={{ marginBottom: '0.5rem' }}>
+            <strong>Flujo de trabajo:</strong> Exporte las notas desde Moodle 4.2, seleccione el archivo CSV aquí, revise la previsualización y confirme la importación.
+          </p>
+          <p style={{ marginBottom: '0.5rem', fontSize: '0.9rem', color: '#666' }}>
+            <strong>Formatos aceptados:</strong>
+            <br />• Moodle 4.2: "Nombre completo", "Email", "ID", "Nombre del curso", "Código del curso", "Calificación"
+            <br />• Simple: "student_carnet", "course_code", "final_grade"
+            <br />• Con IDs: "student_id", "course_id", "final_grade"
+          </p>
+          <button
+            onClick={downloadExampleCSV}
+            className="btn btn-secondary"
+            style={{ marginTop: '0.5rem' }}
+            disabled={uploading || loading}
+          >
+            <FiDownload /> Descargar Ejemplo CSV (Formato Moodle 4.2)
+          </button>
+        </div>
+        <div style={{ 
+          padding: '1rem', 
+          border: '2px dashed #007bff', 
+          borderRadius: '4px',
+          textAlign: 'center',
+          backgroundColor: '#fff',
+          position: 'relative'
+        }}>
+          <label 
+            htmlFor="csv-file-input"
+            style={{
+              display: 'inline-block',
+              padding: '0.75rem 1.5rem',
+              backgroundColor: uploading || loading ? '#6c757d' : '#007bff',
+              color: '#fff',
+              borderRadius: '4px',
+              cursor: uploading || loading ? 'not-allowed' : 'pointer',
+              fontSize: '1rem',
+              fontWeight: 'bold',
+              width: '100%',
+              textAlign: 'center'
+            }}
+          >
+            {uploading || loading ? '⏳ Procesando...' : '📁 Seleccionar Archivo CSV'}
+          </label>
+          <input
+            id="csv-file-input"
+            type="file"
+            accept=".csv"
+            onChange={handleFileUpload}
+            disabled={uploading || loading}
+            style={{ 
+              position: 'absolute',
+              width: '100%',
+              height: '100%',
+              top: 0,
+              left: 0,
+              opacity: 0,
+              cursor: uploading || loading ? 'not-allowed' : 'pointer',
+              zIndex: 1
+            }}
+          />
+          {loading && (
+            <p style={{ marginTop: '0.5rem', color: '#007bff', fontWeight: 'bold' }}>
+              ⏳ Procesando CSV y validando datos...
+            </p>
+          )}
+          {uploading && (
+            <p style={{ marginTop: '0.5rem', color: '#007bff', fontWeight: 'bold' }}>
+              ⏳ Importando notas al sistema...
+            </p>
+          )}
+          {showPreview && !uploading && !loading && (
+            <p style={{ marginTop: '0.5rem', color: '#28a745', fontWeight: 'bold' }}>
+              ✓ CSV procesado correctamente. Revise la previsualización arriba y confirme la importación.
+            </p>
+          )}
+          {!showPreview && !uploading && !loading && (
+            <p style={{ marginTop: '0.5rem', color: '#666', fontSize: '0.9rem' }}>
+              Seleccione el archivo CSV exportado desde Moodle
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );

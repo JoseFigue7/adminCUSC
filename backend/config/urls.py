@@ -9,9 +9,11 @@ from rest_framework import permissions
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
 
+from .views import FrontendIndexView, serve_frontend_asset
+
 schema_view = get_schema_view(
    openapi.Info(
-      title="AdminCUSC API",
+      title="Colegio Santa Cecilia API",
       default_version='v1',
       description="API para sistema de gestión estudiantil administrativo",
       terms_of_service="https://www.google.com/policies/terms/",
@@ -23,6 +25,10 @@ schema_view = get_schema_view(
 )
 
 urlpatterns = [
+    path('', FrontendIndexView.as_view()),
+    path('manifest.json', serve_frontend_asset, {'filename': 'manifest.json'}),
+    path('favicon.ico', serve_frontend_asset, {'filename': 'favicon.ico'}),
+    path('SC Logo.png', serve_frontend_asset, {'filename': 'SC Logo.png'}),
     path('admin/', admin.site.urls),
     path('api/', include('users.urls')),
     path('api/students/', include('students.urls')),
@@ -32,8 +38,11 @@ urlpatterns = [
     path('api/certificates/', include('certificates.urls')),
     path('api/audit/', include('audit.urls')),  # Rutas de auditoría
     path('api/exports/', include('exports.urls')),  # Rutas de exportación
+    path('api/reports/', include('reports.urls')),  # Rutas de reportes
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
+    # SPA: cualquier ruta no capturada (login, dashboard, etc.) sirve index.html para React Router
+    path('<path:path>', FrontendIndexView.as_view()),
 ]
 
 if settings.DEBUG:

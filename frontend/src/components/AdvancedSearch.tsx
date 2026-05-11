@@ -24,10 +24,12 @@ interface AdvancedSearchProps {
 const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ onFilterChange, filters, type, onReset, paymentTypes = [] }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [localFilters, setLocalFilters] = useState<FilterParams>(filters);
+  const [searchInputValue, setSearchInputValue] = useState<string>(filters.search || '');
   
   // Sincronizar filtros locales cuando cambien los filtros externos
   useEffect(() => {
     setLocalFilters(filters);
+    setSearchInputValue(filters.search || '');
   }, [filters]);
 
   const handleFilterChange = (key: string, value: any) => {
@@ -36,9 +38,35 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ onFilterChange, filters
     onFilterChange(newFilters);
   };
 
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const trimmedValue = searchInputValue.trim();
+      const newFilters: FilterParams = { ...localFilters };
+      
+      // Limpiar propiedades undefined y vacías
+      Object.keys(newFilters).forEach(key => {
+        if (newFilters[key] === undefined || newFilters[key] === '') {
+          delete newFilters[key];
+        }
+      });
+      
+      // Agregar o eliminar el filtro de búsqueda
+      if (trimmedValue) {
+        newFilters.search = trimmedValue;
+      } else {
+        delete newFilters.search;
+      }
+      
+      setLocalFilters(newFilters);
+      onFilterChange(newFilters);
+    }
+  };
+
   const handleReset = () => {
     const emptyFilters: FilterParams = {};
     setLocalFilters(emptyFilters);
+    setSearchInputValue('');
     onFilterChange(emptyFilters);
     if (onReset) onReset();
   };
@@ -53,9 +81,10 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ onFilterChange, filters
             <FiSearch className="search-icon" />
             <input
               type="text"
-              placeholder="Buscar por carnet, nombre, apellido, email..."
-              value={localFilters.search || ''}
-              onChange={(e) => handleFilterChange('search', e.target.value)}
+              placeholder="Buscar por carnet, nombre, apellido, email... (Presiona Enter para buscar)"
+              value={searchInputValue}
+              onChange={(e) => setSearchInputValue(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
               className="search-input"
             />
             {hasActiveFilters && (
@@ -98,12 +127,22 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ onFilterChange, filters
               </div>
 
               <div className="filter-group">
-                <label>Apellido</label>
+                <label>Primer Apellido</label>
                 <input
                   type="text"
-                  value={localFilters.last_name || ''}
-                  onChange={(e) => handleFilterChange('last_name', e.target.value)}
-                  placeholder="Buscar por apellido"
+                  value={localFilters.first_last_name || ''}
+                  onChange={(e) => handleFilterChange('first_last_name', e.target.value)}
+                  placeholder="Buscar por primer apellido"
+                />
+              </div>
+
+              <div className="filter-group">
+                <label>Segundo Apellido</label>
+                <input
+                  type="text"
+                  value={localFilters.second_last_name || ''}
+                  onChange={(e) => handleFilterChange('second_last_name', e.target.value)}
+                  placeholder="Buscar por segundo apellido"
                 />
               </div>
 
@@ -173,9 +212,10 @@ const AdvancedSearch: React.FC<AdvancedSearchProps> = ({ onFilterChange, filters
           <FiSearch className="search-icon" />
           <input
             type="text"
-            placeholder="Buscar por estudiante, carnet, número de recibo..."
-            value={localFilters.search || ''}
-            onChange={(e) => handleFilterChange('search', e.target.value)}
+            placeholder="Buscar por estudiante, carnet, número de recibo... (Presiona Enter para buscar)"
+            value={searchInputValue}
+            onChange={(e) => setSearchInputValue(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
             className="search-input"
           />
           {hasActiveFilters && (

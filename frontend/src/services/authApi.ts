@@ -50,6 +50,17 @@ export const changePassword = (oldPassword: string, newPassword: string) =>
     new_password: newPassword,
   });
 
+export const requestPasswordReset = (email: string) =>
+  api.post('/users/request_password_reset/', { email });
+
+export const confirmPasswordReset = (token: string, uid: string, newPassword: string, newPasswordConfirm: string) =>
+  api.post('/users/confirm_password_reset/', {
+    token,
+    uid,
+    new_password: newPassword,
+    new_password_confirm: newPasswordConfirm,
+  });
+
 
 
 

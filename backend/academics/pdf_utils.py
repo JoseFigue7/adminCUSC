@@ -3,7 +3,7 @@ Utilidades para generar PDFs del flujo de inscripción
 """
 from django.template.loader import render_to_string
 from django.http import HttpResponse
-from weasyprint import HTML
+from config.weasyprint_lazy import get_html
 from django.utils import timezone
 from decimal import Decimal
 import io
@@ -473,6 +473,7 @@ def generate_assignment_boleta(cuatrimestre_enrollment):
         """
         
         # Generar PDF
+        HTML = get_html()
         html = HTML(string=html_string)
         pdf_file = io.BytesIO()
         html.write_pdf(pdf_file)
@@ -736,7 +737,7 @@ def generate_payment_voucher(cuatrimestre_enrollment):
             <div style="margin-top: 12px; margin-bottom: 12px;">
                 <p style="margin: 2px 0; font-size: 9pt; font-weight: bold;">Información Bancaria:</p>
                 <p style="margin: 2px 0; font-size: 9pt;">
-                    <strong>Nombre o Razón Social:</strong> Centro de Capacitación Santa Cecilia S.C. | 
+                    <strong>Nombre o Razón Social:</strong> Colegio Santa Cecilia | 
                     <strong>Banco:</strong> Banco Santander | 
                     <strong>No. Cuenta:</strong> 65-50781653-0 | 
                     <strong>Clave:</strong> 014180655078165306
@@ -792,6 +793,7 @@ def generate_payment_voucher(cuatrimestre_enrollment):
         """
         
         # Generar PDF
+        HTML = get_html()
         html = HTML(string=html_string)
         pdf_file = io.BytesIO()
         html.write_pdf(pdf_file)

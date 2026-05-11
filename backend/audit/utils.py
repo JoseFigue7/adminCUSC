@@ -196,6 +196,10 @@ def should_audit_model(model):
     if model.__name__ == 'AuditLog':
         return False
     
+    # Sesiones: payload grande y sensible; además evita ruido y posibles fallos en logout
+    if model._meta.label_lower == 'sessions.session':
+        return False
+    
     auditable_models = get_auditable_models()
     
     # Si no hay lista específica, auditar todos

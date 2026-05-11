@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { FiLogIn, FiUser, FiLock, FiLoader } from '../utils/icons';
 import { useToastContext } from '../context/ToastContext';
@@ -102,16 +102,24 @@ const Login: React.FC = () => {
               </>
             )}
           </button>
+          
+          <div style={{ textAlign: 'center', marginTop: '1rem' }}>
+            <a 
+              href="/forgot-password" 
+              onClick={(e) => {
+                e.preventDefault();
+                navigate('/forgot-password');
+              }}
+              style={{ 
+                color: 'var(--primary-color)', 
+                textDecoration: 'none',
+                fontSize: '0.9rem'
+              }}
+            >
+              ¿Olvidaste tu contraseña?
+            </a>
+          </div>
         </form>
-
-        <div className="auth-footer">
-          <p>
-            ¿No tienes una cuenta?{' '}
-            <Link to="/register" className="auth-link">
-              Regístrate aquí
-            </Link>
-          </p>
-        </div>
       </div>
     </div>
   );

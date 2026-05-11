@@ -343,20 +343,21 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_400_BAD_REQUEST)
         
         # Validar traslapes de horarios entre todos los cursos a inscribir
+        # Solo valida traslapes entre cursos que tienen horarios asignados.
+        # Los cursos sin horarios se permiten (pueden ser cursos en línea o con horarios flexibles).
         courses_list = list(courses)
         overlap_errors = []
-        for i, course1 in enumerate(courses_list):
-            schedules1 = list(course1.schedules.all())
-            if not schedules1:
-                overlap_errors.append(f"El curso {course1.code} - {course1.name} no tiene horarios asignados.")
-                continue
-            
-            for j, course2 in enumerate(courses_list[i+1:], start=i+1):
-                schedules2 = list(course2.schedules.all())
-                if not schedules2:
-                    overlap_errors.append(f"El curso {course2.code} - {course2.name} no tiene horarios asignados.")
-                    continue
-                
+        
+        # Filtrar solo cursos que tienen horarios para validar traslapes
+        courses_with_schedules = []
+        for course in courses_list:
+            schedules = list(course.schedules.all())
+            if schedules:
+                courses_with_schedules.append((course, schedules))
+        
+        # Solo validar traslapes entre cursos que tienen horarios
+        for i, (course1, schedules1) in enumerate(courses_with_schedules):
+            for j, (course2, schedules2) in enumerate(courses_with_schedules[i+1:], start=i+1):
                 # Verificar traslapes entre horarios de course1 y course2
                 for schedule1 in schedules1:
                     for schedule2 in schedules2:
@@ -623,7 +624,7 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
                 student=cuatrimestre_enrollment.student,
                 payment_type=payment_type,
                 payment_method=payment_method,
-                original_amount=enrollment_fee,
+                amount=enrollment_fee,
                 payment_reference=payment_reference,
                 transfer_receipt=transfer_receipt,
                 status='PENDIENTE',
@@ -895,12 +896,12 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
                     student=cuatrimestre_enrollment.student,
                     payment_type=tuition_payment_type,
                     payment_method='TRANSFERENCIA',  # Por defecto, se puede cambiar
-                    original_amount=discounted_amount,
+                    amount=discounted_amount,
                     month=first_month,
                     year=current_year,
                     payment_date=payment_date,  # Fecha programada: día 1 del primer mes
                     due_date=due_date,
-                    status='NO_PAGADO',  # Estado inicial: NO_PAGADO
+                    status='PENDIENTE',  # Estado inicial: PENDIENTE
                     cuatrimestre_enrollment=cuatrimestre_enrollment,
                     notes=f'Pago completo de colegiatura con 10% descuento. Monto original: {total_cuatrimestre}, Descuento: {total_cuatrimestre * Decimal("0.10")}, Pago mensual base: {base_monthly_amount}, Adicionales cursos: {course_additionals}'
                 )
@@ -935,12 +936,12 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
                         student=cuatrimestre_enrollment.student,
                         payment_type=tuition_payment_type,
                         payment_method='TRANSFERENCIA',  # Por defecto, se puede cambiar
-                        original_amount=monthly_amount,
+                        amount=monthly_amount,
                         month=month,
                         year=current_year,
                         payment_date=payment_date,  # Fecha programada: día 1 del mes
                         due_date=due_date,
-                        status='NO_PAGADO',  # Estado inicial: NO_PAGADO
+                        status='PENDIENTE',  # Estado inicial: PENDIENTE
                         cuatrimestre_enrollment=cuatrimestre_enrollment,
                         notes=f'Colegiatura mensual - {dict(Payment.MONTHS)[month]} {current_year}'
                     )
@@ -1239,8 +1240,36 @@ class CuatrimestreEnrollmentViewSet(viewsets.ModelViewSet):
             'status': cuatrimestre_enrollment.status,
             'status_display': cuatrimestre_enrollment.get_status_display(),
             'payments_created': result['payments_created'],
-            'is_enrollment_fee_exempt': cuatrimestre_enrollment.is_enrollment_fee_exempt
+            'is_enrollment_fee_exempt': cuatrimestre_enrollment.is_enrollment_fee_exempt,
+            'no_payments_reason': result.get('no_payments_reason'),
         })
+
+    @action(detail=True, methods=['post'], url_path='regenerate_tuition_payments')
+    def regenerate_tuition_payments(self, request, pk=None):
+        """
+        Si la inscripción está EN_CURSO y no hay ningún pago 102/103/105, genera el plan mensual
+        (p. ej. tras corregir PaymentConfiguration o el monto del tipo 102).
+        """
+        cuatrimestre_enrollment = self.get_object()
+        service = ConfirmCourseAssignmentService(cuatrimestre_enrollment)
+        result = service.regenerate_monthly_tuition_if_missing()
+        if not result['success']:
+            return Response(
+                {
+                    'message': result['message'],
+                    'payments_created': result.get('payments_created') or [],
+                    'errors': result.get('errors') or [],
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            {
+                'message': result['message'],
+                'payments_created': result['payments_created'],
+                'no_payments_reason': result.get('no_payments_reason'),
+            },
+            status=status.HTTP_200_OK,
+        )
     
     @action(detail=True, methods=['get'])
     def payment_voucher(self, request, pk=None):
@@ -1449,16 +1478,74 @@ class CourseEnrollmentViewSet(viewsets.ModelViewSet):
         
         with transaction.atomic():
             for grade_item in grades_data:
-                student_id = grade_item['student_id']
-                course_id = grade_item['course_id']
                 final_grade = grade_item['final_grade']
                 
                 try:
-                    # Verificar que el estudiante existe
-                    student = Student.objects.get(id=student_id)
-                    
-                    # Verificar que el curso existe
-                    course = Course.objects.get(id=course_id)
+                    # Determinar qué formato se está usando
+                    if grade_item.get('student_id') and grade_item.get('course_id'):
+                        # Formato con IDs
+                        student_id = grade_item['student_id']
+                        course_id = grade_item['course_id']
+                        student = Student.objects.get(id=student_id)
+                        course = Course.objects.get(id=course_id)
+                    elif grade_item.get('student_carnet') and grade_item.get('course_code'):
+                        # Formato con carnet y código (puede venir de Moodle como ID/username)
+                        student_identifier = grade_item['student_carnet'].strip()
+                        course_code = grade_item['course_code'].strip()
+                        
+                        # Buscar estudiante por carnet primero, luego por email si no se encuentra
+                        # (Moodle puede exportar con username que puede ser el email)
+                        student = None
+                        try:
+                            # Intentar buscar por carnet
+                            student = Student.objects.get(carnet=student_identifier)
+                        except Student.DoesNotExist:
+                            try:
+                                # Si no se encuentra por carnet, intentar por email (Moodle puede usar email como username)
+                                student = Student.objects.get(email=student_identifier)
+                            except Student.DoesNotExist:
+                                # Si tampoco se encuentra por email, intentar buscar por ID si es UUID
+                                try:
+                                    import uuid
+                                    uuid.UUID(student_identifier)
+                                    student = Student.objects.get(id=student_identifier)
+                                except (ValueError, Student.DoesNotExist):
+                                    pass
+                        
+                        if not student:
+                            results['errors'].append({
+                                'student_carnet': student_identifier,
+                                'course_code': course_code,
+                                'error': f'Estudiante con identificador {student_identifier} no encontrado (buscado por carnet, email e ID)'
+                            })
+                            continue
+                        
+                        # Buscar curso por código
+                        # Si se proporciona career_code, cuatrimestre_number y academic_year, usarlos para filtrar
+                        course_query = Course.objects.filter(code=course_code)
+                        
+                        if grade_item.get('career_code'):
+                            course_query = course_query.filter(career__code=grade_item['career_code'])
+                        if grade_item.get('cuatrimestre_number'):
+                            course_query = course_query.filter(cuatrimestre__number=grade_item['cuatrimestre_number'])
+                        
+                        course = course_query.first()
+                        
+                        if not course:
+                            results['errors'].append({
+                                'student_identifier': student_identifier,
+                                'course_code': course_code,
+                                'error': f'Curso con código {course_code} no encontrado'
+                            })
+                            continue
+                        
+                        student_id = student.id
+                        course_id = course.id
+                    else:
+                        results['errors'].append({
+                            'error': 'Formato inválido: debe proporcionar (student_id y course_id) o (student_carnet y course_code)'
+                        })
+                        continue
                     
                     # Buscar la inscripción existente
                     # Primero buscar por cuatrimestre_enrollment si existe
@@ -1472,7 +1559,7 @@ class CourseEnrollmentViewSet(viewsets.ModelViewSet):
                         cuatrimestre_enrollment = CuatrimestreEnrollment.objects.filter(
                             student_id=student_id,
                             cuatrimestre=course.cuatrimestre,
-                            status__in=['INSCRITO', 'EN_CURSO']
+                            status='EN_CURSO',
                         ).order_by('-academic_year').first()
                         
                         if cuatrimestre_enrollment:
@@ -1492,20 +1579,30 @@ class CourseEnrollmentViewSet(viewsets.ModelViewSet):
                                 'action': 'created'
                             })
                         else:
-                            results['errors'].append({
-                                'student_id': str(student_id),
-                                'course_id': str(course_id),
+                            error_data = {
                                 'error': f'No se encontró inscripción al cuatrimestre para {student.get_full_name()} en {course.name}'
-                            })
+                            }
+                            if 'student_carnet' in grade_item:
+                                error_data['student_carnet'] = grade_item['student_carnet']
+                                error_data['course_code'] = grade_item.get('course_code', '')
+                            else:
+                                error_data['student_id'] = str(student_id)
+                                error_data['course_id'] = str(course_id)
+                            results['errors'].append(error_data)
                             continue
                     else:
                         # Verificar que no esté aprobado (no se puede modificar notas de cursos aprobados)
                         if enrollment.status == 'APROBADO':
-                            results['errors'].append({
-                                'student_id': str(student_id),
-                                'course_id': str(course_id),
+                            error_data = {
                                 'error': f'El curso {course.name} ya fue aprobado por {student.get_full_name()}. No se puede modificar la nota.'
-                            })
+                            }
+                            if 'student_carnet' in grade_item:
+                                error_data['student_carnet'] = grade_item['student_carnet']
+                                error_data['course_code'] = grade_item.get('course_code', '')
+                            else:
+                                error_data['student_id'] = str(student_id)
+                                error_data['course_id'] = str(course_id)
+                            results['errors'].append(error_data)
                             continue
                         
                         # Actualizar la nota
@@ -1531,21 +1628,23 @@ class CourseEnrollmentViewSet(viewsets.ModelViewSet):
                         student.save()
                         
                 except Student.DoesNotExist:
+                    identifier = grade_item.get('student_carnet') or str(student_id) if 'student_id' in locals() else 'N/A'
                     results['errors'].append({
-                        'student_id': str(student_id),
-                        'course_id': str(course_id),
-                        'error': f'Estudiante con ID {student_id} no encontrado'
+                        'student_identifier': identifier,
+                        'course_identifier': grade_item.get('course_code') or str(course_id) if 'course_id' in locals() else 'N/A',
+                        'error': f'Estudiante no encontrado'
                     })
                 except Course.DoesNotExist:
+                    identifier = grade_item.get('course_code') or str(course_id) if 'course_id' in locals() else 'N/A'
                     results['errors'].append({
-                        'student_id': str(student_id),
-                        'course_id': str(course_id),
-                        'error': f'Curso con ID {course_id} no encontrado'
+                        'student_identifier': grade_item.get('student_carnet') or str(student_id) if 'student_id' in locals() else 'N/A',
+                        'course_identifier': identifier,
+                        'error': f'Curso no encontrado'
                     })
                 except Exception as e:
                     results['errors'].append({
-                        'student_id': str(student_id),
-                        'course_id': str(course_id),
+                        'student_identifier': grade_item.get('student_carnet') or str(student_id) if 'student_id' in locals() else 'N/A',
+                        'course_identifier': grade_item.get('course_code') or str(course_id) if 'course_id' in locals() else 'N/A',
                         'error': str(e)
                     })
         

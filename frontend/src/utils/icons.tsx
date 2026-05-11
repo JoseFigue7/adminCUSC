@@ -60,3 +60,4 @@ export const FiAlertTriangle: React.FC<IconProps> = createIcon('FiAlertTriangle'
 export const FiRefreshCw: React.FC<IconProps> = createIcon('FiRefreshCw');
 export const FiCreditCard: React.FC<IconProps> = createIcon('FiCreditCard');
 export const FiEye: React.FC<IconProps> = createIcon('FiEye');
+export const FiFile: React.FC<IconProps> = createIcon('FiFile');

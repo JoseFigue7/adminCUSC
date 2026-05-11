@@ -19,6 +19,11 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-change-this-in-produc
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=True, cast=bool)
 
+# COOP solo aplica en orígenes "confiables" (HTTPS o localhost). Con HTTP+IP el navegador
+# ignora la cabecera y avisa en consola; desactivar salvo USE_HTTPS=True.
+USE_HTTPS = config('USE_HTTPS', default=False, cast=bool)
+SECURE_CROSS_ORIGIN_OPENER_POLICY = 'same-origin' if USE_HTTPS else None
+
 # ALLOWED_HOSTS debe ser configurado para producción
 ALLOWED_HOSTS = config(
     'ALLOWED_HOSTS',
@@ -148,8 +153,13 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
-# WhiteNoise configuration para servir archivos estáticos en producción
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+# Carpeta del build del frontend (React). Solo build/static/ para que /static/js/ y /static/css/ coincidan con el index.html.
+FRONTEND_BUILD_DIR = BASE_DIR.parent / 'frontend' / 'build'
+_frontend_static = FRONTEND_BUILD_DIR / 'static'
+STATICFILES_DIRS = [str(_frontend_static)] if _frontend_static.exists() else []
+
+# WhiteNoise: CompressedStaticFilesStorage evita fallos por .map u otros archivos referenciados faltantes
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedStaticFilesStorage'
 
 MEDIA_URL = 'media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
@@ -213,6 +223,8 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3001",
     "http://137.184.188.234",
     "https://137.184.188.234",
+    "http://146.190.37.214",
+    "https://146.190.37.214",
 ]
 
 # Si tienes dominio, agregarlo aquí:
@@ -229,9 +241,9 @@ if DEBUG:
 # Django Jazzmin Configuration
 JAZZMIN_SETTINGS = {
     # Título del sitio
-    "site_title": "AdminCUSC",
-    "site_header": "AdminCUSC",
-    "site_brand": "AdminCUSC",
+    "site_title": "Colegio Santa Cecilia",
+    "site_header": "Colegio Santa Cecilia",
+    "site_brand": "Colegio Santa Cecilia",
     "site_logo": None,
     "login_logo": None,
     "login_logo_dark": None,
@@ -239,8 +251,8 @@ JAZZMIN_SETTINGS = {
     "site_icon": None,
     
     # Welcome message
-    "welcome_sign": "Bienvenido a AdminCUSC",
-    "copyright": "AdminCUSC",
+    "welcome_sign": "Bienvenido a Colegio Santa Cecilia",
+    "copyright": "Colegio Santa Cecilia",
     "search_model": ["students.Student", "users.User"],
     
     # UI personalización
@@ -369,12 +381,32 @@ SERVER_EMAIL = DEFAULT_FROM_EMAIL  # Email para errores del servidor
 
 # Timeout para conexiones SMTP (en segundos)
 EMAIL_TIMEOUT = config('EMAIL_TIMEOUT', default=10, cast=int)
+# Frontend URL para enlaces en emails
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:3000')
 
 
 # Stripe Configuration
 STRIPE_SECRET_KEY = config('STRIPE_SECRET_KEY', default='')
 STRIPE_PUBLISHABLE_KEY = config('STRIPE_PUBLISHABLE_KEY', default='')
 STRIPE_WEBHOOK_SECRET = config('STRIPE_WEBHOOK_SECRET', default='')
+
+# Logging: errores 5xx de Django en consola (Gunicorn → journalctl)
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+    },
+}
 
 # Audit Configuration
 AUDIT_ENABLED = config('AUDIT_ENABLED', default=True, cast=bool)

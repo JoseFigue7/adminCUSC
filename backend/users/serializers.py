@@ -93,5 +93,28 @@ class UserProfileSerializer(serializers.ModelSerializer):
         fields = ['id', 'username', 'email', 'first_name', 'last_name', 'phone', 'role', 'date_joined']
 
 
+class PasswordResetRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField(required=True)
+    
+    def validate_email(self, value):
+        try:
+            User.objects.get(email=value)
+        except User.DoesNotExist:
+            # Por seguridad, no revelamos si el email existe o no
+            pass
+        return value
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    token = serializers.CharField(required=True)
+    new_password = serializers.CharField(required=True, validators=[validate_password])
+    new_password_confirm = serializers.CharField(required=True)
+    
+    def validate(self, attrs):
+        if attrs['new_password'] != attrs['new_password_confirm']:
+            raise serializers.ValidationError({"new_password": "Las contraseñas no coinciden."})
+        return attrs
+
+
 
 

@@ -29,33 +29,20 @@ echo -e "${YELLOW}📦 Actualizando código desde Git...${NC}"
 cd $PROJECT_DIR
 git pull origin main
 
+echo -e "${YELLOW}⚛️  Frontend primero (obligatorio antes de collectstatic)...${NC}"
+cd $FRONTEND_DIR
+npm install
+npm run build
+
 echo -e "${YELLOW}🐍 Configurando backend...${NC}"
 cd $BACKEND_DIR
-
-# Activar entorno virtual
 source $VENV_DIR/bin/activate
-
-# Instalar/actualizar dependencias
 pip install --upgrade pip
 pip install -r requirements.txt
-
-# Ejecutar migraciones
 python manage.py migrate --noinput
-
-# Recolectar archivos estáticos
+# collectstatic DEBE ir después de npm run build: copia build/static/* → staticfiles
 python manage.py collectstatic --noinput
-
-# Cargar datos iniciales si es necesario
 # python manage.py seed_careers
-
-echo -e "${YELLOW}⚛️  Configurando frontend...${NC}"
-cd $FRONTEND_DIR
-
-# Instalar/actualizar dependencias
-npm install
-
-# Construir aplicación de producción
-npm run build
 
 echo -e "${YELLOW}🔄 Reiniciando servicios...${NC}"
 

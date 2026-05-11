@@ -10,7 +10,8 @@ drf-yasg==1.21.7
 weasyprint==66.0
 django-jazzmin==2.6.0
 stripe==14.1.0
-setuptools>=69.0.0
+setuptools>=69.0.0,<81
 gunicorn==21.2.0
 whitenoise==6.6.0
+openpyxl==3.1.2
 

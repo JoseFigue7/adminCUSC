@@ -1,0 +1,78 @@
+================================================================================
+ACCESO SSH — AdminCUSC (léeme antes de usar)
+================================================================================
+
+POR QUÉ NO HAY UNA "LLAVE PRIVADA" DENTRO DE GIT
+--------------------------------------------------------------------------------
+Subir una llave privada al repositorio (GitHub, zip compartido, etc.) es muy
+peligroso: quien tenga el repo podría entrar a tu servidor.
+
+En esta carpeta:
+  - Las instrucciones SÍ van al repo (este archivo + .gitignore).
+  - Los archivos id_* y *.pem NO deben subirse (están en .gitignore).
+
+GENERAR TU PAR DE CLAVES (en tu Mac o PC, en esta carpeta del proyecto)
+--------------------------------------------------------------------------------
+Abre Terminal y ejecuta:
+
+  cd ruta/al/proyecto/adminCUSC/acceso_ssh
+  ssh-keygen -t ed25519 -f ./id_ed25519_admincusc -N "" -C "admincusc"
+
+Eso crea:
+  id_ed25519_admincusc      → PRIVADA (solo tú / solo tus máquinas de deploy)
+  id_ed25519_admincusc.pub → PÚBLICA (sí va al servidor)
+
+PASO A PASO: INSTALAR LA CLAVE PÚBLICA EN EL SERVIDOR (consola del droplet)
+--------------------------------------------------------------------------------
+1) Entra al servidor como root (o el usuario con sudo), por el método que ya uses.
+
+2) Asegura la carpeta ssh del usuario con el que te conectarás (ej. root):
+
+     mkdir -p ~/.ssh
+     chmod 700 ~/.ssh
+
+3) En TU Mac (no en el servidor), muestra la clave pública:
+
+     cat ruta/al/proyecto/adminCUSC/acceso_ssh/id_ed25519_admincusc.pub
+
+   Copia toda la línea (empieza por ssh-ed25519 ...).
+
+4) En el SERVIDOR, pega la clave al final de authorized_keys:
+
+     nano ~/.ssh/authorized_keys
+     # pega la línea, guarda (Ctrl+O, Enter) y sal (Ctrl+X)
+
+   O en una sola línea (sustituye PEGAR_AQUI_LA_PUBLICA):
+
+     echo 'PEGAR_AQUI_LA_PUBLICA' >> ~/.ssh/authorized_keys
+
+5) Permisos correctos:
+
+     chmod 600 ~/.ssh/authorized_keys
+
+6) Comprueba que sshd permite claves (en Ubuntu suele estar bien por defecto).
+   Si usas usuario distinto de root, repite los pasos en /home/eseusuario/.ssh/
+
+CONECTAR DESDE TU MAC USANDO ESA CLAVE PRIVADA
+--------------------------------------------------------------------------------
+  ssh -i "ruta/al/proyecto/adminCUSC/acceso_ssh/id_ed25519_admincusc" root@TU_IP
+
+Opcional — evitar escribir -i cada vez, en ~/.ssh/config en tu Mac:
+
+  Host admincusc
+      HostName TU_IP
+      User root
+      IdentityFile ruta/al/proyecto/adminCUSC/acceso_ssh/id_ed25519_admincusc
+
+Luego:  ssh admincusc
+
+RESPALDO PARA NO PERDERLA
+--------------------------------------------------------------------------------
+- Copia id_ed25519_admincusc y .pub a un gestor de contraseñas o disco cifrado.
+- NO las subas a Git; el .gitignore de esta carpeta bloquea id_* y *.pem.
+
+SI LA CLAVE SE FILTRA
+--------------------------------------------------------------------------------
+En el servidor, borra esa línea de ~/.ssh/authorized_keys y genera un par nuevo.
+
+================================================================================

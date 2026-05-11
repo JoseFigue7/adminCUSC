@@ -13,7 +13,8 @@ class StudentFilter(django_filters.FilterSet):
     # Filtros por campos específicos
     carnet = django_filters.CharFilter(lookup_expr='icontains', label='Carnet')
     first_name = django_filters.CharFilter(lookup_expr='icontains', label='Nombre')
-    last_name = django_filters.CharFilter(lookup_expr='icontains', label='Apellido')
+    first_last_name = django_filters.CharFilter(lookup_expr='icontains', label='Primer Apellido')
+    second_last_name = django_filters.CharFilter(lookup_expr='icontains', label='Segundo Apellido')
     email = django_filters.CharFilter(lookup_expr='icontains', label='Email')
     
     # Filtros por relaciones
@@ -48,7 +49,8 @@ class StudentFilter(django_filters.FilterSet):
             return queryset.filter(
                 Q(carnet__icontains=value) |
                 Q(first_name__icontains=value) |
-                Q(last_name__icontains=value) |
+                Q(first_last_name__icontains=value) |
+                Q(second_last_name__icontains=value) |
                 Q(email__icontains=value) |
                 Q(phone__icontains=value) |
                 Q(curp__icontains=value)

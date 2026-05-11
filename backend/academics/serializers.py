@@ -114,6 +114,7 @@ class CuatrimestreEnrollmentSerializer(serializers.ModelSerializer):
 
 class CourseEnrollmentSerializer(serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
+    student_carnet = serializers.SerializerMethodField()
     course_name = serializers.CharField(source='course.name', read_only=True)
     course_code = serializers.CharField(source='course.code', read_only=True)
     course_id = serializers.CharField(source='course.id', read_only=True)
@@ -130,6 +131,12 @@ class CourseEnrollmentSerializer(serializers.ModelSerializer):
         """Obtener nombre completo del estudiante"""
         if obj.student:
             return obj.student.get_full_name()
+        return ''
+    
+    def get_student_carnet(self, obj):
+        """Obtener carnet del estudiante"""
+        if obj.student:
+            return obj.student.carnet or ''
         return ''
     
     def get_cuatrimestre_enrollment_academic_year(self, obj):
@@ -158,9 +165,25 @@ class GraduationMethodSerializer(serializers.ModelSerializer):
 
 
 class GradeUploadItemSerializer(serializers.Serializer):
-    """Serializer para un item individual de carga de notas"""
-    student_id = serializers.UUIDField(required=True)
-    course_id = serializers.UUIDField(required=True)
+    """Serializer para un item individual de carga de notas
+    
+    Acepta dos formatos:
+    1. Con IDs: student_id, course_id, final_grade
+    2. Con carnet y código: student_carnet, course_code, final_grade (opcionalmente con career_code, cuatrimestre_number, academic_year)
+    """
+    # Formato con IDs (formato original)
+    student_id = serializers.UUIDField(required=False, allow_null=True)
+    course_id = serializers.UUIDField(required=False, allow_null=True)
+    
+    # Formato con carnet y código (más fácil de usar)
+    student_carnet = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    course_code = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    
+    # Campos opcionales para formato completo
+    career_code = serializers.IntegerField(required=False, allow_null=True)
+    cuatrimestre_number = serializers.IntegerField(required=False, allow_null=True)
+    academic_year = serializers.IntegerField(required=False, allow_null=True)
+    
     final_grade = serializers.DecimalField(
         max_digits=5,
         decimal_places=2,
@@ -168,6 +191,30 @@ class GradeUploadItemSerializer(serializers.Serializer):
         min_value=0,
         max_value=100
     )
+    
+    def validate(self, data):
+        """Validar que se proporcione uno de los dos formatos"""
+        # Verificar formato con IDs
+        student_id = data.get('student_id')
+        course_id = data.get('course_id')
+        has_id_format = student_id is not None and course_id is not None
+        
+        # Verificar formato con carnet y código
+        student_carnet = data.get('student_carnet')
+        course_code = data.get('course_code')
+        has_carnet_format = student_carnet and student_carnet.strip() and course_code and course_code.strip()
+        
+        if not has_id_format and not has_carnet_format:
+            raise serializers.ValidationError(
+                "Debe proporcionar (student_id y course_id) o (student_carnet y course_code)"
+            )
+        
+        if has_id_format and has_carnet_format:
+            raise serializers.ValidationError(
+                "No puede proporcionar ambos formatos a la vez. Use (student_id y course_id) o (student_carnet y course_code)"
+            )
+        
+        return data
 
 
 class BulkGradeUploadSerializer(serializers.Serializer):

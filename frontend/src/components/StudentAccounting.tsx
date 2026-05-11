@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { getStudent, paymentsApi } from '../services/api';
-import { FiDollarSign, FiDownload, FiEye, FiCalendar, FiCreditCard, FiArrowLeft, FiLoader } from '../utils/icons';
+import { FiDollarSign, FiEye, FiCalendar, FiCreditCard, FiArrowLeft } from '../utils/icons';
 import { useToast } from '../hooks/useToast';
 import './shared.css';
 
@@ -29,6 +29,9 @@ interface Payment {
   transfer_receipt: string | null;
   transaction_id: string;
   card_last_four: string;
+  /** Si el API serializa payment_type como PK, vienen estos campos */
+  payment_type_name?: string;
+  payment_type_code?: string;
 }
 
 interface PendingDebt {
@@ -64,20 +67,68 @@ interface AccountingData {
   payments: Payment[];
 }
 
+const EMPTY_SUMMARY: AccountingData['summary'] = {
+  total_paid: 0,
+  total_debt: 0,
+  balance: 0,
+  total_payments: 0,
+  approved_payments: 0,
+  pending_payments: 0,
+};
+
+/** Asegura la forma esperada si el API devolvió datos incompletos o otra ruta respondió 200. */
+function normalizeAccountingPayload(raw: unknown): AccountingData {
+  const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const s = r.summary && typeof r.summary === 'object' ? (r.summary as Record<string, unknown>) : {};
+  const st = r.student && typeof r.student === 'object' ? (r.student as Record<string, unknown>) : {};
+  return {
+    student: {
+      id: String(st.id ?? ''),
+      carnet: String(st.carnet ?? ''),
+      full_name: String(st.full_name ?? ''),
+      email: String(st.email ?? ''),
+    },
+    summary: {
+      total_paid: Number(s.total_paid ?? 0),
+      total_debt: Number(s.total_debt ?? 0),
+      balance: Number(s.balance ?? 0),
+      total_payments: Number(s.total_payments ?? 0),
+      approved_payments: Number(s.approved_payments ?? 0),
+      pending_payments: Number(s.pending_payments ?? 0),
+    },
+    pending_debts: Array.isArray(r.pending_debts) ? (r.pending_debts as PendingDebt[]) : [],
+    payments: Array.isArray(r.payments) ? (r.payments as Payment[]) : [],
+  };
+}
+
+function summaryForDisplay(data: AccountingData): AccountingData['summary'] {
+  const s = data.summary;
+  if (!s || typeof s !== 'object') {
+    return { ...EMPTY_SUMMARY };
+  }
+  return {
+    total_paid: Number(s.total_paid ?? 0),
+    total_debt: Number(s.total_debt ?? 0),
+    balance: Number(s.balance ?? 0),
+    total_payments: Number(s.total_payments ?? 0),
+    approved_payments: Number(s.approved_payments ?? 0),
+    pending_payments: Number(s.pending_payments ?? 0),
+  };
+}
+
 const StudentAccounting: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { success, error } = useToast();
+  const { error } = useToast();
   
   const [student, setStudent] = useState<any>(null);
   const [accountingData, setAccountingData] = useState<AccountingData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [loadingAccounting, setLoadingAccounting] = useState(false);
-
   useEffect(() => {
     if (id) {
       loadData();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cargar al cambiar id
   }, [id]);
 
   const loadData = async () => {
@@ -91,7 +142,7 @@ const StudentAccounting: React.FC = () => {
       ]);
       
       setStudent(studentRes.data);
-      setAccountingData(accountingRes.data);
+      setAccountingData(normalizeAccountingPayload(accountingRes.data));
     } catch (err: any) {
       console.error('Error loading data:', err);
       const errorMessage = err.response?.data?.error || 
@@ -149,6 +200,8 @@ const StudentAccounting: React.FC = () => {
     );
   }
 
+  const summary = summaryForDisplay(accountingData);
+
   return (
     <div className="page-container">
       <div className="page-header">
@@ -192,7 +245,7 @@ const StudentAccounting: React.FC = () => {
                 Total Pagado
               </div>
               <div style={{ fontSize: '1.5rem', fontWeight: '600', color: '#10b981' }}>
-                {formatCurrency(accountingData.summary.total_paid)}
+                {formatCurrency(summary.total_paid)}
               </div>
             </div>
             <div>
@@ -200,7 +253,7 @@ const StudentAccounting: React.FC = () => {
                 Deudas Pendientes
               </div>
               <div style={{ fontSize: '1.5rem', fontWeight: '600', color: '#ef4444' }}>
-                {formatCurrency(accountingData.summary.total_debt)}
+                {formatCurrency(summary.total_debt)}
               </div>
             </div>
             <div>
@@ -210,9 +263,9 @@ const StudentAccounting: React.FC = () => {
               <div style={{ 
                 fontSize: '1.5rem', 
                 fontWeight: '600', 
-                color: accountingData.summary.balance >= 0 ? '#10b981' : '#ef4444'
+                color: summary.balance >= 0 ? '#10b981' : '#ef4444'
               }}>
-                {formatCurrency(accountingData.summary.balance)}
+                {formatCurrency(summary.balance)}
               </div>
             </div>
             <div>
@@ -220,7 +273,7 @@ const StudentAccounting: React.FC = () => {
                 Pagos Totales
               </div>
               <div style={{ fontSize: '1.5rem', fontWeight: '600', color: 'var(--text-primary)' }}>
-                {accountingData.summary.total_payments}
+                {summary.total_payments}
               </div>
             </div>
           </div>
@@ -299,7 +352,9 @@ const StudentAccounting: React.FC = () => {
                           </div>
                         </td>
                         <td>
-                          {payment.payment_type ? (
+                          {payment.payment_type &&
+                          typeof payment.payment_type === 'object' &&
+                          payment.payment_type !== null ? (
                             <div>
                               <div style={{ fontWeight: '500' }}>{payment.payment_type.name}</div>
                               {payment.payment_type.code && (
@@ -309,7 +364,16 @@ const StudentAccounting: React.FC = () => {
                               )}
                             </div>
                           ) : (
-                            'N/A'
+                            <div>
+                              <div style={{ fontWeight: '500' }}>
+                                {payment.payment_type_name ?? 'N/A'}
+                              </div>
+                              {payment.payment_type_code ? (
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                  {payment.payment_type_code}
+                                </div>
+                              ) : null}
+                            </div>
                           )}
                         </td>
                         <td>
